@@ -34,6 +34,7 @@ HVAC_MODE_MAP = {
 }
 
 # Map Home Assistant modes to their Nest equivalents
+# Map Home Assistant modes to Nest modes
 MODE_HASS_TO_NEST = {
     HVACMode.HEAT_COOL: "range",  # heat-cool
     HVACMode.COOL: "cool",
@@ -42,7 +43,15 @@ MODE_HASS_TO_NEST = {
 }
 
 # Map Nest modes to Home Assistant modes
-MODE_NEST_TO_HASS = {v: k for k, v in MODE_HASS_TO_NEST.items()}
+MODE_NEST_TO_HASS = {
+    "range": HVACMode.HEAT_COOL,
+    "cool": HVACMode.COOL,
+    "heat": HVACMode.HEAT,
+    "off": HVACMode.OFF,
+    # Add explicit mapping for additional Nest modes
+    "eco": HVACMode.OFF,  # Map eco to OFF since we handle eco separately
+    "heat-cool": HVACMode.HEAT_COOL,  # Alternative format sometimes used
+}
 
 # Update fan mode mapping to use new constants
 FAN_MODE_MAP = {
@@ -276,8 +285,15 @@ class NestClimate(ClimateEntity):
         """Return current HVAC mode."""
         try:
             device_data = self.device.device_data[self.device_id]
-            # Use the hvac_mode field which is synchronized with Nest's state
-            mode = device_data.get('hvac_mode', 'off')
+            mode = device_data.get('mode', 'off')
+            hvac_mode = device_data.get('hvac_mode', 'off')
+            
+            _LOGGER.debug(
+                f"Determining HVAC mode - "
+                f"Raw mode: {mode}, "
+                f"HVAC mode: {hvac_mode}, "
+                f"Current data: {device_data}"
+            )
             can_heat = device_data.get('can_heat', False)
             can_cool = device_data.get('can_cool', False)
             
@@ -291,8 +307,10 @@ class NestClimate(ClimateEntity):
                 _LOGGER.debug(f"Device {self.device_id} has no heating/cooling capability")
                 return HVACMode.OFF
 
-            # Map the mode based on capabilities
-            mapped_mode = HVAC_MODE_MAP.get(mode, HVACMode.OFF)
+            # Try to map the mode, checking both 'mode' and 'hvac_mode'
+            mapped_mode = MODE_NEST_TO_HASS.get(mode) or HVAC_MODE_MAP.get(hvac_mode, HVACMode.OFF)
+            
+            _LOGGER.debug(f"Initial mode mapping: {mode} -> {mapped_mode}")
             
             # Validate the mapped mode against capabilities
             if mapped_mode == HVACMode.HEAT and not can_heat:
@@ -305,7 +323,10 @@ class NestClimate(ClimateEntity):
                 _LOGGER.debug(f"Device {self.device_id} cannot heat and cool, forcing OFF mode")
                 return HVACMode.OFF
                 
-            _LOGGER.debug(f"Device {self.device_id} final mode: {mapped_mode}")
+                _LOGGER.debug(
+                    f"Device {self.device_id} final mode: {mapped_mode} "
+                    f"(can_heat: {can_heat}, can_cool: {can_cool})"
+                )
             return mapped_mode
                 
         except (KeyError, AttributeError) as e:
@@ -364,16 +385,6 @@ class NestClimate(ClimateEntity):
     def set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
         try:
-            device_data = self.device.device_data[self.device_id]
-            current_mode = device_data.get('hvac_mode', 'off')
-            
-            _LOGGER.debug(
-                f"Device {self.device_id} - "
-                f"Current mode: {current_mode}, "
-                f"Setting to: {hvac_mode}, "
-                f"Available modes: {self.hvac_modes}"
-            )
-            
             # Check if the requested mode is supported by the device
             if hvac_mode not in self.hvac_modes:
                 _LOGGER.error(f"HVAC mode {hvac_mode} not supported by device {self.device_id}")
@@ -381,26 +392,21 @@ class NestClimate(ClimateEntity):
 
             if hvac_mode in MODE_HASS_TO_NEST:
                 nest_mode = MODE_HASS_TO_NEST[hvac_mode]
+                _LOGGER.debug(
+                    f"Setting {self.device_id} to mode: {hvac_mode} "
+                    f"(Nest mode: {nest_mode})"
+                )
                 
-                # Only send the mode change if it's different
-                if current_mode != nest_mode:
-                    _LOGGER.debug(
-                        f"Setting {self.device_id} to mode: {hvac_mode} "
-                        f"(Nest mode: {nest_mode})"
-                    )
-                    
-                    # Force an update before setting the mode
-                    self.device.update()
-                    
-                    self.device.thermostat_set_mode(
-                        self.device_id,
-                        nest_mode,
-                    )
-                    
-                    # Force another update to get the new state
-                    self.device.update()
-                else:
-                    _LOGGER.debug(f"Device {self.device_id} already in mode {hvac_mode}")
+                # Force an update before setting the mode to ensure we have latest state
+                self.device.update()
+                
+                self.device.thermostat_set_mode(
+                    self.device_id,
+                    nest_mode,
+                )
+                
+                # Force another update to get the new state
+                self.device.update()
             else:
                 _LOGGER.error(f"Invalid HVAC mode: {hvac_mode}")
         except Exception as e:

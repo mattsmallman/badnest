@@ -219,7 +219,15 @@ class NestAPI():
 
     def update(self):
         try:
+            _LOGGER.debug("Starting device update")
+            
+            # Store previous state for comparison
+            previous_states = {
+                device_id: dict(data) for device_id, data in self.device_data.items()
+            }
+            
             # Get friendly names
+            _LOGGER.debug("Fetching friendly names")
             response = self._do_request(
                 self._session.post,
                 f"{API_URL}/api/0.1/user/{self._user_id}/app_launch",
@@ -239,6 +247,7 @@ class NestAPI():
                         self._wheres[where['where_id']] = where['name']
 
             # Get device data
+            _LOGGER.debug("Fetching device data")
             response = self._do_request(
                 self._session.post,
                 f"{API_URL}/api/0.1/user/{self._user_id}/app_launch",
@@ -253,8 +262,10 @@ class NestAPI():
                 sensor_data = bucket["value"]
                 sn = bucket["object_key"].split('.')[1]
                 # Thermostats (thermostat and sensors system)
-                if bucket["object_key"].startswith(
-                        f"shared.{sn}"):
+                if bucket["object_key"].startswith(f"shared.{sn}"):
+                    _LOGGER.debug(f"Processing shared data for thermostat {sn}")
+                    _LOGGER.debug(f"Raw thermostat data: {sensor_data}")
+                    
                     self.device_data[sn]['current_temperature'] = \
                         sensor_data["current_temperature"]
                     self.device_data[sn]['target_temperature'] = \
@@ -271,19 +282,29 @@ class NestAPI():
                         sensor_data["can_heat"]
                     self.device_data[sn]['can_cool'] = \
                         sensor_data["can_cool"]
-                    # Store both the target_temperature_type (for setting) and hvac_mode (for display)
-                    self.device_data[sn]['mode'] = sensor_data["target_temperature_type"]
-                    self.device_data[sn]['hvac_mode'] = sensor_data["target_temperature_type"]
-                    _LOGGER.debug(
-                        f"Thermostat {sn} mode update - "
-                        f"Type: {sensor_data['target_temperature_type']}"
-                    )
+                    self.device_data[sn]['mode'] = \
+                        sensor_data["target_temperature_type"]
+                    
                     if self.device_data[sn]['hvac_ac_state']:
                         self.device_data[sn]['action'] = "cooling"
                     elif self.device_data[sn]['hvac_heater_state']:
                         self.device_data[sn]['action'] = "heating"
                     else:
                         self.device_data[sn]['action'] = "off"
+                        
+                    # Log changes
+                    if sn in previous_states:
+                        changes = {
+                            key: (previous_states[sn].get(key), self.device_data[sn][key])
+                            for key in self.device_data[sn]
+                            if key in previous_states[sn] and 
+                            previous_states[sn][key] != self.device_data[sn][key]
+                        }
+                        if changes:
+                            _LOGGER.debug(
+                                f"State changes for {sn}:\n" + 
+                                "\n".join(f"  {k}: {v[0]} -> {v[1]}" for k, v in changes.items())
+                            )
                 # Thermostats, pt 2
                 elif bucket["object_key"].startswith(
                         f"device.{sn}"):
@@ -383,6 +404,8 @@ class NestAPI():
         except (simplejson.errors.JSONDecodeError, KeyError, IndexError) as e:
             # Catch any data parsing errors but don't retry since _do_request already handles retries
             _LOGGER.error(f"Error parsing update data: {str(e)}")
+        except Exception as e:
+            _LOGGER.error(f"Unexpected error during update: {str(e)}", exc_info=True)
 
     def thermostat_set_temperature(self, device_id, temp, temp_high=None):
         """Set target temperature for thermostat."""
@@ -432,46 +455,44 @@ class NestAPI():
     def thermostat_set_mode(self, device_id, mode):
         """Set operation mode for thermostat."""
         if device_id not in self.thermostats:
+            _LOGGER.warning(f"Thermostat {device_id} not found in registered devices")
             return
 
-        _LOGGER.debug(f"Setting thermostat {device_id} mode to: {mode}")
-        
-        # Get current device data
-        device_data = self.device_data.get(device_id, {})
-        current_mode = device_data.get('hvac_mode', 'off')
-        can_heat = device_data.get('can_heat', False)
-        can_cool = device_data.get('can_cool', False)
-
         _LOGGER.debug(
-            f"Current state - Mode: {current_mode}, "
-            f"Can Heat: {can_heat}, Can Cool: {can_cool}"
+            f"Setting mode for {device_id} - "
+            f"Current device data: {self.device_data.get(device_id, {})}"
         )
 
-        # Validate the requested mode against device capabilities
-        if (mode == 'heat' and not can_heat) or \
-           (mode == 'cool' and not can_cool) or \
-           (mode == 'heat-cool' and not (can_heat and can_cool)):
-            _LOGGER.warning(
-                f"Device {device_id} cannot perform mode {mode} - "
-                f"Heat: {can_heat}, Cool: {can_cool}"
+        try:
+            response = self._do_request(
+                self._session.post,
+                f"{self._czfe_url}/v5/put",
+                json={
+                    "objects": [
+                        {
+                            "object_key": f'shared.{device_id}',
+                            "op": "MERGE",
+                            "value": {"target_temperature_type": mode},
+                        }
+                    ]
+                },
+                headers={"Authorization": f"Basic {self._access_token}"},
             )
-            # Default to 'off' if requested mode isn't supported
-            mode = 'off'
-
-        self._do_request(
-            self._session.post,
-            f"{self._czfe_url}/v5/put",
-            json={
-                "objects": [
-                    {
-                        "object_key": f'shared.{device_id}',
-                        "op": "MERGE",
-                        "value": {"target_temperature_type": mode},
-                    }
-                ]
-            },
-            headers={"Authorization": f"Basic {self._access_token}"},
-        )
+            
+            _LOGGER.debug(f"Mode change response for {device_id}: {response}")
+            
+            # Force an immediate update to get new state
+            self.update()
+            
+            # Log the new state
+            _LOGGER.debug(
+                f"Device state after mode change - "
+                f"Device: {device_id}, "
+                f"New state: {self.device_data.get(device_id, {})}"
+            )
+            
+        except Exception as e:
+            _LOGGER.error(f"Failed to set mode for {device_id} to {mode}: {str(e)}")
 
     def thermostat_set_fan(self, device_id, date):
         """Set fan timer for thermostat."""
