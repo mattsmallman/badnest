@@ -134,7 +134,7 @@ class NestWaterHeater(WaterHeaterEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
-        # Use the same device info as the thermostat to make it a child entity
+        # Link to thermostat as parent device
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
             name=self.device.device_data[self.device_id]['name'],
@@ -142,6 +142,7 @@ class NestWaterHeater(WaterHeaterEntity):
             model="Thermostat",
             sw_version=self.device.device_data[self.device_id].get('software_version'),
             suggested_area=self.device.device_data[self.device_id].get('where_name'),
+            via_device=(DOMAIN, self._entry_id),  # Link to parent thermostat
         )
 
     @property
