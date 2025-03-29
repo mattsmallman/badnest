@@ -1,3 +1,4 @@
+"""Support for Nest Water Heater devices."""
 import logging
 import time
 import voluptuous as vol
@@ -5,40 +6,31 @@ import voluptuous as vol
 from datetime import datetime
 from homeassistant.util.dt import now
 from homeassistant.helpers import config_validation as cv
-from homeassistant.const import (
-    ATTR_ENTITY_ID,
-)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.components.water_heater import (
+    WaterHeaterEntity,
+    WaterHeaterEntityFeature,
     STATE_OFF,
     STATE_ON,
     ATTR_AWAY_MODE,
     ATTR_OPERATION_MODE,
     ATTR_OPERATION_LIST,
 )
-from homeassistant.components.water_heater import (
-    WaterHeaterEntity,
-    WaterHeaterEntityFeature,
-)
+
+from .const import DOMAIN
 
 # Replace old constants with new enum-based features
 SUPPORT_OPERATION_MODE = WaterHeaterEntityFeature.OPERATION_MODE
 SUPPORT_AWAY_MODE = WaterHeaterEntityFeature.AWAY_MODE
 SUPPORT_BOOST_MODE = 8  # Custom feature flag
 
-# Update supported features to use bitwise OR with new enum
 SUPPORTED_FEATURES = (
     WaterHeaterEntityFeature.OPERATION_MODE |
     WaterHeaterEntityFeature.AWAY_MODE |
     SUPPORT_BOOST_MODE
-)
-
-try:
-    from homeassistant.components.water_heater import WaterHeaterEntity
-except ImportError:
-    from homeassistant.components.water_heater import WaterHeaterDevice as WaterHeaterEntity
-
-from .const import (
-    DOMAIN,
 )
 
 STATE_SCHEDULE = 'Schedule'
@@ -66,19 +58,29 @@ BOOST_HOT_WATER_SCHEMA = vol.Schema(
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(hass,
-                               config,
-                               async_add_entities,
-                               discovery_info=None):
-    """Set up the Nest water heater device."""
-    api = hass.data[DOMAIN]['api']
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Nest water heater device from config entry."""
+    api = hass.data[DOMAIN][config_entry.entry_id]["api"]
 
-    waterheaters = []
-    _LOGGER.info("Adding waterheaters")
-    for waterheater in api['hotwatercontrollers']:
-        _LOGGER.info(f"Adding nest waterheater uuid: {waterheater}")
-        waterheaters.append(NestWaterHeater(waterheater, api))
-    async_add_entities(waterheaters)
+    entities = []
+    _LOGGER.info("Adding water heaters")
+    for controller in api['hotwatercontrollers']:
+        _LOGGER.info(f"Adding nest water heater uuid: {controller}")
+        # Only add if the device supports hot water control
+        if api.device_data[controller].get('has_hot_water_control', False):
+            entities.append(
+                NestWaterHeater(
+                    device_id=controller,
+                    api=api,
+                    entry_id=config_entry.entry_id,
+                )
+            )
+
+    async_add_entities(entities)
 
     def hot_water_boost(service):
         """Handle the service call."""
@@ -89,7 +91,7 @@ async def async_setup_platform(hass,
         _LOGGER.debug('HW boost mode: {} ending: {}'.format(mode, timeToEnd))
 
         _waterheaters = [
-            x for x in waterheaters if not entity_ids or x.entity_id in entity_ids
+            x for x in entities if not entity_ids or x.entity_id in entity_ids
         ]
 
         for nest_water_heater in _waterheaters:
@@ -106,35 +108,36 @@ async def async_setup_platform(hass,
     )
 
 class NestWaterHeater(WaterHeaterEntity):
-
     """Representation of a Nest water heater device."""
 
     _attr_supported_features = SUPPORTED_FEATURES
     
-    def __init__(self, device_id, api):
-        """Initialize the sensor."""
+    def __init__(self, device_id: str, api, entry_id: str) -> None:
+        """Initialize the water heater."""
         super().__init__()
-        self._attr_name = "Nest Hot Water Heater"
         self.device_id = device_id
         self.device = api
-        self._attr_unique_id = f"{device_id}_hw"
+        self._entry_id = entry_id
+        
+        # Set unique ID incorporating config entry ID for multi-account support
+        self._attr_unique_id = f"{entry_id}_{device_id}_hw"
+        
+        device_data = self.device.device_data[device_id]
+        name = device_data.get('name', '')
+        self._attr_name = f"{name} Hot Water"
 
     @property
     def device_info(self):
         """Return device information."""
         return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
+            "identifiers": {(DOMAIN, f"{self._entry_id}_{self.device_id}")},
+            "name": self.device.device_data[self.device_id]['name'],
             "manufacturer": "Nest",
-            "model": "Hot Water Controller",
-            "via_device": (DOMAIN, self.device_id)
+            "model": "Thermostat",
+            "sw_version": self.device.device_data[self.device_id].get('software_version'),
+            "suggested_area": self.device.device_data[self.device_id].get('where_name'),
+            "via_device": (DOMAIN, self._entry_id),
         }
-
-    @property
-    def name(self):
-        """Return the name of the water heater."""
-        return "{0} Hot Water".format(
-            self.device.device_data[self.device_id]['name'])
 
     @property
     def icon(self):
@@ -247,10 +250,3 @@ class NestWaterHeater(WaterHeaterEntity):
     def update(self):
         """Get the latest data from the Hot Water Sensor and updates the states."""
         self.device.update()
-
-async def async_service_away_mode(entity, service):
-    """Handle away mode service."""
-    if service.data[ATTR_AWAY_MODE]:
-        await entity.async_turn_away_mode_on()
-    else:
-        await entity.async_turn_away_mode_off()

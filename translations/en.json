@@ -2,21 +2,22 @@
     "config": {
         "step": {
             "user": {
-                "title": "Bad Nest Connection Settings",
-                "description": "Enter your Nest account credentials",
+                "title": "Connect to Nest",
+                "description": "Set up your Nest integration using direct authentication. You need your user_id and access_token from your existing Nest configuration.",
                 "data": {
                     "user_id": "User ID",
                     "access_token": "Access Token",
-                    "region": "Region (default: us)"
+                    "region": "Region (us, eu)"
                 }
             }
         },
         "error": {
-            "cannot_connect": "Failed to connect to Nest API, please check your credentials",
+            "cannot_connect": "Failed to connect. Please check your credentials and try again",
+            "invalid_auth": "Invalid authentication",
             "unknown": "Unexpected error occurred"
         },
         "abort": {
-            "already_configured": "Account is already configured"
+            "already_configured": "Nest account is already configured"
         }
     },
     "entity": {

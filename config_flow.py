@@ -35,6 +35,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     api = NestAPI(
         user_id=data[CONF_USER_ID],
         access_token=data[CONF_ACCESS_TOKEN],
+        issue_token=None,  # Not using Google auth
+        cookie=None,       # Not using Google auth
         region=data[CONF_REGION],
     )
 
@@ -42,6 +44,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         # Force an API call to verify credentials
         await hass.async_add_executor_job(api.update)
     except Exception as err:
+        _LOGGER.exception("Validation error")
         raise CannotConnect from err
 
     # Return validated data
@@ -59,20 +62,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle a flow initialized by the user."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Check if already configured
+            await self.async_set_unique_id(user_input[CONF_USER_ID])
+            self._abort_if_unique_id_configured()
+
             try:
                 info = await validate_input(self.hass, user_input)
-
                 return self.async_create_entry(
                     title=f"Nest ({info[CONF_REGION]})",
                     data=info,
                 )
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
 
@@ -81,6 +87,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
         )
+
+    async def async_step_import(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle import from YAML config."""
+        # Set unique id for imported config
+        await self.async_set_unique_id(user_input[CONF_USER_ID])
+        self._abort_if_unique_id_configured()
+
+        return self.async_create_entry(
+            title=f"Nest ({user_input[CONF_REGION]})",
+            data=user_input,
+        )
+
 
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""

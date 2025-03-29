@@ -1,22 +1,55 @@
 """The Bad Nest integration."""
 import logging
-from typing import Any
+import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
+import homeassistant.helpers.config_validation as cv
 
-from .const import DOMAIN, CONF_USER_ID, CONF_ACCESS_TOKEN, CONF_REGION
+from .const import (
+    DOMAIN,
+    CONF_USER_ID,
+    CONF_ACCESS_TOKEN,
+    CONF_REGION,
+)
 from .api import NestAPI
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.WATER_HEATER]
+
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_USER_ID): cv.string,
+                vol.Required(CONF_ACCESS_TOKEN): cv.string,
+                vol.Optional(CONF_REGION, default="us"): cv.string,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Bad Nest component."""
     hass.data[DOMAIN] = {}
+
+    if DOMAIN not in config:
+        return True
+
+    # If user has YAML config, create a config entry from it
+    user_input = dict(config[DOMAIN])
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": "import"},
+            data=user_input,
+        )
+    )
+
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -25,6 +58,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api = NestAPI(
             user_id=entry.data[CONF_USER_ID],
             access_token=entry.data[CONF_ACCESS_TOKEN],
+            issue_token=None,  # Not using Google auth
+            cookie=None,       # Not using Google auth
             region=entry.data[CONF_REGION],
         )
         
