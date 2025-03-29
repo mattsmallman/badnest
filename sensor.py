@@ -192,7 +192,6 @@ class NestTemperatureSensor(NestBaseSensor):
             via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
             serial_number=self.device_id,
-            suggested_type="sensor",
         )
 
     @property 
@@ -275,7 +274,6 @@ class NestProtectSensor(SensorEntity):
             via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
             serial_number=self.device_id,
-            suggested_type="smoke",
         )
 
     @property

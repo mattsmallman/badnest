@@ -200,7 +200,6 @@ class NestClimate(ClimateEntity):
             via_device=(DOMAIN, self._entry_id),
             connections=connections,
             serial_number=serial_number,
-            suggested_type="thermostat",
         )
 
     @property
