@@ -187,10 +187,12 @@ class NestAPI:
                     self.device_data[sn] = {}
                 elif bucket.startswith('device.'):
                     sn = bucket.replace('device.', '')
+                    _LOGGER.debug(f"Processing device bucket for {sn}")
                     self.thermostats.append(sn)
                     self.temperature_sensors.append(sn)
-                    self.hotwatercontrollers.append(sn)
+                    self.hotwatercontrollers.append(sn)  # Add all thermostats as potential hot water controllers
                     self.device_data[sn] = {}
+                    _LOGGER.debug(f"Added {sn} to hot water controllers")
                 elif bucket.startswith('quartz.'):
                     sn = bucket.replace('quartz.', '')
                     self.cameras.append(sn)
@@ -326,13 +328,21 @@ class NestAPI:
             self.device_data[sn]['eco'] = False
 
         # Hot water data
-        self.device_data[sn]['has_hot_water_control'] = sensor_data["has_hot_water_control"]
-        self.device_data[sn]['hot_water_status'] = sensor_data["hot_water_active"]
-        self.device_data[sn]['hot_water_actively_heating'] = sensor_data["hot_water_boiling_state"]
-        self.device_data[sn]['hot_water_away_active'] = sensor_data["hot_water_away_active"]
-        self.device_data[sn]['hot_water_timer_mode'] = sensor_data["hot_water_mode"]
-        self.device_data[sn]['hot_water_away_setting'] = sensor_data["hot_water_away_enabled"]
-        self.device_data[sn]['hot_water_boost_setting'] = sensor_data["hot_water_boost_time_to_end"]
+        _LOGGER.debug(f"Processing hot water data for {sn}")
+        has_hw = sensor_data.get("has_hot_water_control", False)
+        _LOGGER.debug(f"Device {sn} has_hot_water_control: {has_hw}")
+        
+        if has_hw:
+            self.device_data[sn]['has_hot_water_control'] = True
+            self.device_data[sn]['hot_water_status'] = sensor_data.get("hot_water_active", False)
+            self.device_data[sn]['hot_water_actively_heating'] = sensor_data.get("hot_water_boiling_state", False)
+            self.device_data[sn]['hot_water_away_active'] = sensor_data.get("hot_water_away_active", False)
+            self.device_data[sn]['hot_water_timer_mode'] = sensor_data.get("hot_water_mode", "off")
+            self.device_data[sn]['hot_water_away_setting'] = sensor_data.get("hot_water_away_enabled", False)
+            self.device_data[sn]['hot_water_boost_setting'] = sensor_data.get("hot_water_boost_time_to_end", 0)
+            _LOGGER.debug(f"Hot water data for {sn}: {self.device_data[sn]}")
+        else:
+            self.device_data[sn]['has_hot_water_control'] = False
 
     async def _process_protect(self, sn: str, sensor_data: Dict) -> None:
         """Process Nest Protect data."""

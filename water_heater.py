@@ -62,7 +62,14 @@ async def async_setup_entry(
     _LOGGER.info("Adding water heaters")
     for controller in api.hotwatercontrollers:
         _LOGGER.info(f"Adding nest water heater uuid: {controller}")
-        if api.device_data[controller].get('has_hot_water_control', False):
+        device_data = api.device_data[controller]
+        _LOGGER.debug(f"Device data for {controller}: {device_data}")
+        
+        has_hw_control = device_data.get('has_hot_water_control', False)
+        _LOGGER.debug(f"Has hot water control: {has_hw_control}")
+        
+        if has_hw_control:
+            _LOGGER.info(f"Creating water heater entity for {controller}")
             entities.append(
                 NestWaterHeater(
                     device_id=controller,
@@ -119,20 +126,22 @@ class NestWaterHeater(WaterHeaterEntity):
         
         # Initialize from device data
         device_data = self.device.device_data[device_id]
+        _LOGGER.debug(f"Initializing water heater with data: {device_data}")
+        
         self._attr_name = f"{device_data.get('name', '')} Hot Water"
+        _LOGGER.info(f"Created water heater entity: {self._attr_name}")
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
-        device_data = self.device.device_data[self.device_id]
+        # Use the same device info as the thermostat to make it a child entity
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
-            name=device_data.get('name', "Nest Thermostat"),
+            name=self.device.device_data[self.device_id]['name'],
             manufacturer="Nest",
             model="Thermostat",
-            sw_version=device_data.get('software_version'),
-            suggested_area=device_data.get('where_name'),
-            via_device=(DOMAIN, self._entry_id),
+            sw_version=self.device.device_data[self.device_id].get('software_version'),
+            suggested_area=self.device.device_data[self.device_id].get('where_name'),
         )
 
     @property

@@ -18,7 +18,13 @@ from .api import NestAPI
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.WATER_HEATER]
+PLATFORMS = [
+    Platform.CLIMATE,
+    Platform.SENSOR,
+    Platform.WATER_HEATER,
+    Platform.CAMERA,
+    Platform.SWITCH,
+]
 
 CONFIG_SCHEMA = vol.Schema(
     {
