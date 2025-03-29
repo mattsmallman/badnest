@@ -205,8 +205,7 @@ class NestClimate(ClimateEntity):
                 "learning_days_completed_cool": data.get('learning_days_completed_cool'),
             },
             "eco": {
-                "mode": data.get('eco', {}).get('mode'),
-                "mode_update_timestamp": data.get('eco', {}).get('mode_update_timestamp'),
+                "enabled": data.get('eco', False),
                 "leaf_away_high": data.get('leaf_away_high'),
                 "leaf_away_low": data.get('leaf_away_low'),
                 "leaf_threshold_cool": data.get('leaf_threshold_cool'),
