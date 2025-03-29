@@ -126,7 +126,10 @@ class NestWaterHeater(WaterHeaterEntity):
         """Return device information."""
         return {
             "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name
+            "name": self.name,
+            "manufacturer": "Nest",
+            "model": "Hot Water Controller",
+            "via_device": (DOMAIN, self.device_id)
         }
 
     @property
@@ -163,50 +166,30 @@ class NestWaterHeater(WaterHeaterEntity):
     def state_attributes(self):
         """Return the optional state attributes."""
         data = {}
+        device_data = self.device.device_data[self.device_id]
 
-        supported_features = self.supported_features
-
-        # Operational mode will be off or schedule
-        if supported_features & SUPPORT_OPERATION_MODE:
+        # Core state attributes
+        if self.supported_features & SUPPORT_OPERATION_MODE:
             data[ATTR_OPERATION_MODE] = self.current_operation
 
-        # This is, is the away mode feature turned on/off
-        if supported_features & SUPPORT_AWAY_MODE:
+        # Away mode attributes
+        if self.supported_features & SUPPORT_AWAY_MODE:
             is_away = self.is_away_mode_on
             data[ATTR_AWAY_MODE] = STATE_ON if is_away else STATE_OFF
+            data[ATTR_AWAY_MODE_ACTIVE] = device_data.get('hot_water_away_active', False)
 
-        # away_mode_active - true if away mode is active.
-        # If away mode is on, and no one has been seen for 48hrs away mode
-        # should go active
-        if supported_features & SUPPORT_AWAY_MODE:
-            if self.device.device_data[self.device_id]['hot_water_away_active']:
-                away_active = self.device.device_data[self.device_id]['hot_water_away_active']
-                data[ATTR_AWAY_MODE_ACTIVE] = away_active
-            else:
-                data[ATTR_AWAY_MODE_ACTIVE] = False
+        # Boost mode attributes
+        if self.supported_features & SUPPORT_BOOST_MODE:
+            boost_time = device_data.get('hot_water_boost_setting', 0)
+            data[ATTR_BOOST_MODE_STATUS] = bool(boost_time)
+            if boost_time:
+                data['boost_time_remaining'] = boost_time - int(time.time())
 
-        if supported_features & SUPPORT_BOOST_MODE:
-            # boost_mode - true if boost mode is currently active.
-            # boost_mode will be 0 if off, and non-zero otherwise - it is set to
-            # the epoch time when the boost is due to end
-            if self.device.device_data[self.device_id]['hot_water_boost_setting']:
-                boost_mode = self.device.device_data[self.device_id]['hot_water_boost_setting']
-                data[ATTR_BOOST_MODE_STATUS] = bool(boost_mode)
-            else:
-                data[ATTR_BOOST_MODE_STATUS] = False
-
-        # heating_active - true if hot water is currently being heated.
-        # So it is either on via schedule or boost and currently firing
-        # (demand on) the boiler
-        if self.device.device_data[self.device_id]['hot_water_status']:
-            if self.device.device_data[self.device_id]['hot_water_actively_heating']:
-                boiler_firing = self.device.device_data[self.device_id]['hot_water_actively_heating']
-                data[ATTR_HEATING_ACTIVE] = boiler_firing
-            else:
-                data[ATTR_HEATING_ACTIVE] = False
-        else:
-            data[ATTR_HEATING_ACTIVE] = False
-
+        # Status attributes
+        data[ATTR_HEATING_ACTIVE] = device_data.get('hot_water_actively_heating', False)
+        data['next_transition_time'] = device_data.get('hot_water_next_transition_time', None)
+        data['boiling_state'] = device_data.get('hot_water_boiling_state', False)
+        
         _LOGGER.debug("Device state attributes: {}".format(data))
         return data
 
