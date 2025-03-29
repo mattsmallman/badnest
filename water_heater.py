@@ -143,10 +143,8 @@ class NestWaterHeater(WaterHeaterEntity):
 
     @property
     def state(self):
-        """Return the (master) state of the water heater."""
-        if self.device.device_data[self.device_id]['hot_water_status']:
-            return NEST_TO_HASS_STATE[self.device.device_data[self.device_id]['hot_water_status']]
-        return STATE_OFF
+        """Return the operation mode as the main state."""
+        return self.current_operation
 
     @property
     def capability_attributes(self):
@@ -163,7 +161,7 @@ class NestWaterHeater(WaterHeaterEntity):
     @property
     def state_attributes(self):
         """Return the optional state attributes."""
-        data = {}
+        data = super().state_attributes or {}
         device_data = self.device.device_data[self.device_id]
 
         # Core state attributes
@@ -184,6 +182,7 @@ class NestWaterHeater(WaterHeaterEntity):
                 data['boost_time_remaining'] = boost_time - int(time.time())
 
         # Status attributes
+        data['is_heating'] = device_data.get('hot_water_status', False)
         data[ATTR_HEATING_ACTIVE] = device_data.get('hot_water_actively_heating', False)
         data['next_transition_time'] = device_data.get('hot_water_next_transition_time', None)
         data['boiling_state'] = device_data.get('hot_water_boiling_state', False)
