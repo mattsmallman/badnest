@@ -1,89 +1,87 @@
-"""Component to interface with switches that can be controlled remotely."""
+"""Support for Nest switches."""
 import logging
-from .const import DOMAIN
-from homeassistant.components.switch import (
-    DEVICE_CLASS_SWITCH,
-)
+from typing import Any
 
-try:
-    from homeassistant.components.switch import SwitchEntity
-except ImportError:
-    from homeassistant.components.switch import SwitchDevice as SwitchEntity
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-CHIME_ON_ICON = "mdi:bell-outline"
-CHIME_OFF_ICON = "mdi:bell-off-outline"
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Nest switches from config entry."""
+    api = hass.data[DOMAIN][config_entry.entry_id]["api"]
 
-
-async def async_setup_platform(hass,
-                               config,
-                               async_add_entities,
-                               discovery_info=None):
-    """Create the switches for the Nest devices."""
-    api = hass.data[DOMAIN]['api']
     switches = []
     _LOGGER.info("Adding switches")
-
-    for switch in api["switches"]:
-        if api.device_data[switch]['indoor_chime']:
-            _LOGGER.info(f"Adding Nest Chime Switch uuid: {switch}")
-            switches.append(ChimeSwitch(switch, api))
+    for switch in api.switches:
+        _LOGGER.info(f"Adding nest switch uuid: {switch}")
+        if api.device_data[switch].get('indoor_chime', False):
+            switches.append(NestChimeSwitch(
+                switch,
+                api,
+                config_entry.entry_id,
+            ))
 
     async_add_entities(switches)
 
+class NestChimeSwitch(SwitchEntity):
+    """Implementation of Nest camera indoor chime switch."""
 
-class ChimeSwitch(SwitchEntity):
-
-    """
-    Switch to turn the Nest Hello doorbell cameras indoor chime on or off.
-    """
-
-    def __init__(self, device_id, api):
-        """Initialize the switch for a Nest Doorbell."""
+    def __init__(self, device_id: str, api, entry_id: str) -> None:
+        """Initialize the switch."""
         self.device_id = device_id
         self.device = api
+        self._entry_id = entry_id
+        
+        # Set unique ID incorporating config entry ID
+        self._attr_unique_id = f"{entry_id}_{device_id}_chime"
+        
+        # Initialize from device data
+        device_data = self.device.device_data[device_id]
+        self._attr_name = f"{device_data.get('name', '')} Indoor Chime"
+        self._attr_is_on = device_data.get('chime_state', False)
 
     @property
-    def unique_id(self):
-        """Return an unique ID."""
-        return self.device_id + '_' + self.device_class
+    def device_info(self) -> DeviceInfo:
+        """Return device specific attributes."""
+        device_data = self.device.device_data[self.device_id]
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
+            name=device_data.get('name', "Nest Camera"),
+            manufacturer="Nest",
+            model=device_data.get('model', "Camera"),
+            sw_version=device_data.get('software_version'),
+            suggested_area=device_data.get('where_name'),
+            via_device=(DOMAIN, self._entry_id),
+        )
 
     @property
-    def name(self):
-        """Name of the device."""
-        return self.device.device_data[self.device_id]['name'] + '_' + self.device_class
+    def icon(self) -> str:
+        """Return the icon to use in the frontend."""
+        return "mdi:bell" if self.is_on else "mdi:bell-off"
 
-    @property
-    def is_on(self):
-        """If the switch is currently on or off."""
-        cs = self.device.device_data[self.device_id]['chime_state']
-        return cs
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn on indoor chime."""
+        await self.device.camera_turn_chime_on(self.device_id)
+        self._attr_is_on = True
+        self.async_write_ha_state()
 
-    def turn_on(self, **kwargs):
-        """Turn the chime on."""
-        self.device.camera_turn_chime_on(self.device_id)
-        self.schedule_update_ha_state()
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off indoor chime."""
+        await self.device.camera_turn_chime_off(self.device_id)
+        self._attr_is_on = False
+        self.async_write_ha_state()
 
-    def turn_off(self, **kwargs):
-        """Turn the chime off."""
-        self.device.camera_turn_chime_off(self.device_id)
-        self.schedule_update_ha_state()
-
-    def supports_doorbell_chime(self):
-        """Return if camera supports doorbell chime."""
-        return self.device.device_data[self.device_id]['indoor_chime']
-
-    @property
-    def icon(self):
-        """Return the icon."""
-        return CHIME_ON_ICON if self.is_on else CHIME_OFF_ICON
-
-    @property
-    def device_class(self):
-        """Return the class of this device, from component DEVICE_CLASSES."""
-        return DEVICE_CLASS_SWITCH
-
-    def update(self):
-        """Get the latest data for the Switch and updates the states."""
-        self.device.update()
+    async def async_update(self) -> None:
+        """Update the status of the indoor chime."""
+        await self.device.update()
+        self._attr_is_on = self.device.device_data[self.device_id].get('chime_state', False)

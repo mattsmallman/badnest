@@ -64,7 +64,7 @@ async def async_setup_entry(
     
     # Add temperature sensors
     _LOGGER.info("Adding temperature sensors")
-    for sensor in api['temperature_sensors']:
+    for sensor in api.temperature_sensors:
         _LOGGER.info(f"Adding nest temp sensor uuid: {sensor}")
         entities.append(NestTemperatureSensor(
             sensor, 
@@ -75,7 +75,7 @@ async def async_setup_entry(
 
     # Add protect sensors
     _LOGGER.info("Adding protect sensors")
-    for sensor in api['protects']:
+    for sensor in api.protects:
         _LOGGER.info(f"Adding nest protect sensor uuid: {sensor}")
         device_name = api.device_data[sensor]['name']
         
@@ -134,7 +134,7 @@ class NestTemperatureSensor(SensorEntity):
 
     async def async_update(self):
         """Get the latest data and updates the states."""
-        await self.hass.async_add_executor_job(self.device.update)
+        await self.device.update()
 
 class NestProtectSensor(SensorEntity):
     """Representation of a Nest Protect sensor."""
@@ -173,4 +173,4 @@ class NestProtectSensor(SensorEntity):
 
     async def async_update(self):
         """Get the latest data and update the state."""
-        await self.hass.async_add_executor_job(self.device.update)
+        await self.device.update()

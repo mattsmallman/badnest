@@ -1,12 +1,34 @@
+# Service ID
 boost_hot_water:
-  description: Turn boost mode on for the period of time specified, or off."
+  # Service name
+  name: Boost Hot Water
+  # Service description
+  description: Boost hot water for a specified time period.
+  
+  # Target selection
+  target:
+    entity:
+      domain: water_heater
+      integration: badnest
+
+  # Fields
   fields:
-    entity_id:
-      description: Name(s) of entites to change.
-      example: "water_heater.hot_water"
     time_period:
-      description: Time period in minutes for the boost.
-      example: 30
+      name: Time Period
+      description: Duration in minutes to boost hot water for.
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 240
+          unit_of_measurement: minutes
+          mode: slider
+          step: 1
+
     boost_mode:
-      description: Enable boost funcion.
-      example: True
+      name: Boost Mode
+      description: Whether to enable (true) or disable (false) boost mode.
+      required: true
+      selector:
+        boolean:
