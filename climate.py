@@ -22,6 +22,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN
 
@@ -75,29 +76,32 @@ PRESET_MODES = [PRESET_NONE, PRESET_ECO]
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(hass,
-                               config,
-                               async_add_entities,
-                               discovery_info=None):
-    """Set up the Nest climate device."""
-    api = hass.data[DOMAIN]['api']
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Nest climate devices from config entry."""
+    api = hass.data[DOMAIN][config_entry.entry_id]["api"]
 
-    thermostats = []
+    entities = []
     _LOGGER.info("Adding thermostats")
     try:
-        for thermostat in api.thermostats:  # Access thermostats as property
+        for thermostat in api.thermostats:
             _LOGGER.info(f"Adding nest thermostat uuid: {thermostat}")
-            thermostats.append(NestClimate(thermostat, api))
+            entities.append(NestClimate(
+                device_id=thermostat,
+                api=api,
+                entry=config_entry,
+            ))
 
-        if not thermostats:
+        if not entities:
             _LOGGER.warning("No thermostats found in Nest API response")
-            return False
+            return
 
-        async_add_entities(thermostats)
-        return True
+        async_add_entities(entities)
     except Exception as e:
         _LOGGER.error(f"Failed to setup Nest climate platform: {str(e)}")
-        return False
 
 class NestClimate(ClimateEntity):
     """Nest climate device."""
@@ -108,48 +112,62 @@ class NestClimate(ClimateEntity):
     
     _attr_preset_modes = PRESET_MODES
 
-    def __init__(self, device_id, api):
-        """Initialize the thermostat."""
-        super().__init__()
-        try:
-            self.device_id = device_id
-            self.device = api
-            self._attr_unique_id = device_id
+def __init__(self, device_id: str, api, entry: ConfigEntry) -> None:
+    """Initialize the thermostat."""
+    super().__init__()
+    try:
+        self.device_id = device_id
+        self.device = api
+        self._entry = entry
+        
+        # Set unique ID incorporating config entry ID for multi-account support
+        self._attr_unique_id = f"{entry.entry_id}_{device_id}_climate"
 
-            # Set supported features based on device capabilities
-            supported_features = (
-                ClimateEntityFeature.TARGET_TEMPERATURE |
-                ClimateEntityFeature.TARGET_TEMPERATURE_RANGE |
-                ClimateEntityFeature.PRESET_MODE
-            )
+        device_data = self.device.device_data[device_id]
+        if not device_data:
+            raise KeyError(f"No device data found for thermostat {device_id}")
+            
+        # Set up device info with config entry linkage
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")},
+            name=device_data.get('name', "Nest Thermostat"),
+            manufacturer="Nest",
+            model="Thermostat",
+            sw_version=device_data.get('software_version'),
+            suggested_area=device_data.get('where_name'),
+            via_device=(DOMAIN, entry.entry_id),
+        )
 
-            # Add fan support only if device has a fan
-            if api.device_data[device_id].get('has_fan', False):
-                supported_features |= ClimateEntityFeature.FAN_MODE
-                self._attr_fan_modes = [FAN_ON, FAN_AUTO]
-            
-            self._attr_supported_features = supported_features
-            
-            # Verify device data is available
-            if self.device_id not in self.device.device_data:
-                raise KeyError(f"No device data found for thermostat {device_id}")
+        # Set supported features based on device capabilities
+        supported_features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE |
+            ClimateEntityFeature.TARGET_TEMPERATURE_RANGE |
+            ClimateEntityFeature.PRESET_MODE
+        )
 
-            device_data = self.device.device_data[self.device_id]    
-            self._attr_name = device_data.get('name', "Nest Thermostat")
-            
-            # Initialize required properties
-            self._attr_current_temperature = None
-            self._attr_target_temperature = None
-            self._attr_target_temperature_high = None
-            self._attr_target_temperature_low = None
-            self._attr_current_humidity = None
-            
-            # Initialize preset mode based on eco state
-            self._attr_preset_mode = PRESET_ECO if device_data.get('eco', False) else PRESET_NONE
-            
-        except Exception as e:
-            _LOGGER.error(f"Failed to initialize Nest climate device: {str(e)}")
-            raise
+        # Add fan support only if device has a fan
+        if device_data.get('has_fan', False):
+            supported_features |= ClimateEntityFeature.FAN_MODE
+            self._attr_fan_modes = [FAN_ON, FAN_AUTO]
+        
+        self._attr_supported_features = supported_features
+        
+        # Set name combining device name and type
+        self._attr_name = f"{device_data.get('name')} Thermostat"
+        
+        # Initialize required properties
+        self._attr_current_temperature = None
+        self._attr_target_temperature = None
+        self._attr_target_temperature_high = None
+        self._attr_target_temperature_low = None
+        self._attr_current_humidity = None
+        
+        # Initialize preset mode based on eco state
+        self._attr_preset_mode = PRESET_ECO if device_data.get('eco', False) else PRESET_NONE
+        
+    except Exception as e:
+        _LOGGER.error(f"Failed to initialize Nest climate device: {str(e)}")
+        raise
 
     @property
     def unique_id(self):

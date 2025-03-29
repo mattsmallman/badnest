@@ -1,12 +1,17 @@
+"""Support for Nest sensors."""
 import logging
 from typing import Any
 
-from homeassistant.helpers.entity import Entity
 from homeassistant.components.sensor import (
     SensorEntity,
-    SensorDeviceClass,
+    SensorDeviceClass, 
     SensorStateClass,
+    SensorEntityDescription,
 )
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.const import (
     ATTR_BATTERY_LEVEL,
     UnitOfTemperature,
@@ -16,77 +21,105 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PROTECT_SENSOR_TYPES = [
-    "co_status",
-    "smoke_status",
-    "battery_health_state"  # Matches API data structure
-]
-
-SENSOR_TYPES = {
-    "temperature": {
-        "device_class": SensorDeviceClass.TEMPERATURE,
-        "state_class": SensorStateClass.MEASUREMENT,
-        "unit": UnitOfTemperature.CELSIUS,
-        "icon": "mdi:thermometer",
-        "name": "Temperature",
-    },
-    "co_status": {
-        "device_class": SensorDeviceClass.ENUM,
-        "icon": "mdi:molecule-co",
-        "name": "CO Status",
-    },
-    "smoke_status": {
-        "device_class": SensorDeviceClass.ENUM,
-        "icon": "mdi:smoke-detector",
-        "name": "Smoke Status",
-    },
-    "battery_health_state": {  # Matches API data structure
-        "device_class": SensorDeviceClass.ENUM,
-        "icon": "mdi:battery",
-        "name": "Battery Health",
-    },
+SENSOR_DESCRIPTIONS = {
+    "temperature": SensorEntityDescription(
+        key="temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        icon="mdi:thermometer",
+        name="Temperature",
+    ),
+    "co_status": SensorEntityDescription(
+        key="co_status",
+        device_class=SensorDeviceClass.ENUM,
+        icon="mdi:molecule-co",
+        name="CO Status",
+    ),
+    "smoke_status": SensorEntityDescription(
+        key="smoke_status",
+        device_class=SensorDeviceClass.ENUM,
+        icon="mdi:smoke-detector", 
+        name="Smoke Status",
+    ),
+    "battery_health_state": SensorEntityDescription(
+        key="battery_health_state",
+        device_class=SensorDeviceClass.ENUM,
+        icon="mdi:battery",
+        name="Battery Health",
+    ),
 }
 
-async def async_setup_platform(hass,
-                               config,
-                               async_add_entities,
-                               discovery_info=None):
-    """Set up the Nest climate device."""
-    api = hass.data[DOMAIN]['api']
+PROTECT_SENSOR_TYPES = ["co_status", "smoke_status", "battery_health_state"]
 
-    temperature_sensors = []
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Nest sensors from config entry."""
+    api = hass.data[DOMAIN][config_entry.entry_id]["api"]
+
+    entities = []
+    
+    # Add temperature sensors
     _LOGGER.info("Adding temperature sensors")
     for sensor in api['temperature_sensors']:
         _LOGGER.info(f"Adding nest temp sensor uuid: {sensor}")
-        temperature_sensors.append(NestTemperatureSensor(sensor, api))
+        entities.append(NestTemperatureSensor(
+            sensor, 
+            api,
+            SENSOR_DESCRIPTIONS["temperature"],
+            config_entry,
+        ))
 
-    async_add_entities(temperature_sensors)
-
-    protect_sensors = []
+    # Add protect sensors
     _LOGGER.info("Adding protect sensors")
     for sensor in api['protects']:
         _LOGGER.info(f"Adding nest protect sensor uuid: {sensor}")
+        device_name = api.device_data[sensor]['name']
+        
         for sensor_type in PROTECT_SENSOR_TYPES:
-            protect_sensors.append(NestProtectSensor(sensor, sensor_type, api))
+            entities.append(NestProtectSensor(
+                sensor,
+                api,
+                SENSOR_DESCRIPTIONS[sensor_type],
+                device_name,
+                config_entry,
+            ))
 
-    async_add_entities(protect_sensors)
-
+    async_add_entities(entities)
 
 class NestTemperatureSensor(SensorEntity):
     """Implementation of the Nest Temperature Sensor."""
 
-    def __init__(self, device_id, api):
+    def __init__(self, device_id: str, api, description: SensorEntityDescription, entry: ConfigEntry):
         """Initialize the sensor."""
-        super().__init__()
-        self._attr_name = "Nest Temperature Sensor"
-        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        self._attr_device_class = SensorDeviceClass.TEMPERATURE
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self.entity_description = description
         self.device_id = device_id
         self.device = api
-        self._attr_unique_id = device_id
-
+        self._entry = entry
+        
+        # Set unique ID
+        self._attr_unique_id = f"{entry.entry_id}_{device_id}_temperature"
+        
+        # Set name from device data
+        self._attr_name = f"{self.device.device_data[device_id]['name']} Temperature"
+        
     @property
+    def device_info(self) -> DeviceInfo:
+        """Return device specific attributes."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.entry_id}_{self.device_id}")},
+            name=self.device.device_data[self.device_id]['name'],
+            manufacturer="Nest",
+            model="Temperature Sensor",
+            sw_version=self.device.device_data[self.device_id].get('software_version'),
+            suggested_area=self.device.device_data[self.device_id].get('where_name'),
+            via_device=(DOMAIN, self._entry.entry_id),
+        )
+
+    @property 
     def native_value(self):
         """Return the state of the sensor."""
         return self.device.device_data[self.device_id]['temperature']
@@ -103,32 +136,35 @@ class NestTemperatureSensor(SensorEntity):
         """Get the latest data and updates the states."""
         await self.hass.async_add_executor_job(self.device.update)
 
-
 class NestProtectSensor(SensorEntity):
     """Representation of a Nest Protect sensor."""
 
-    def __init__(self, device_id, sensor_type, api):
+    def __init__(self, device_id: str, api, description: SensorEntityDescription, device_name: str, entry: ConfigEntry):
         """Initialize the sensor."""
-        self._attr_unique_id = f"{device_id}_{sensor_type}"
+        self.entity_description = description
         self.device_id = device_id
-        self._sensor_type = sensor_type
         self.device = api
+        self._sensor_type = description.key
+        self._entry = entry
         
-        self._attr_device_class = SENSOR_TYPES[sensor_type]["device_class"]
-        if "state_class" in SENSOR_TYPES[sensor_type]:
-            self._attr_state_class = SENSOR_TYPES[sensor_type]["state_class"]
-        self._attr_icon = SENSOR_TYPES[sensor_type]["icon"]
-        self._attr_name = f"{self.device.device_data[device_id]['name']} {SENSOR_TYPES[sensor_type]['name']}"
+        # Set unique ID
+        self._attr_unique_id = f"{entry.entry_id}_{device_id}_{description.key}"
+        
+        # Set name combining device name and sensor type
+        self._attr_name = f"{device_name} {description.name}"
 
     @property
-    def device_info(self):
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, self.device_id)},
-            "name": self.device.device_data[self.device_id]['name'],
-            "manufacturer": "Nest",
-            "model": "Protect",
-        }
+    def device_info(self) -> DeviceInfo:
+        """Return device specific attributes."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.entry_id}_{self.device_id}")},
+            name=self.device.device_data[self.device_id]['name'],
+            manufacturer="Nest",
+            model="Protect",
+            sw_version=self.device.device_data[self.device_id].get('software_version'),
+            suggested_area=self.device.device_data[self.device_id].get('where_name'),
+            via_device=(DOMAIN, self._entry.entry_id),
+        )
 
     @property
     def native_value(self):

@@ -1,0 +1,55 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Bad Nest Connection Settings",
+                "description": "Enter your Nest account credentials",
+                "data": {
+                    "user_id": "User ID",
+                    "access_token": "Access Token",
+                    "region": "Region (default: us)"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect to Nest API, please check your credentials",
+            "unknown": "Unexpected error occurred"
+        },
+        "abort": {
+            "already_configured": "Account is already configured"
+        }
+    },
+    "entity": {
+        "climate": {
+            "thermostat": {
+                "state_attributes": {
+                    "preset_mode": {
+                        "eco": "Eco"
+                    }
+                }
+            }
+        },
+        "sensor": {
+            "co_status": {
+                "state": {
+                    "ok": "OK",
+                    "warning": "Warning",
+                    "emergency": "Emergency"
+                }
+            },
+            "smoke_status": {
+                "state": {
+                    "ok": "OK",
+                    "warning": "Warning",
+                    "emergency": "Emergency"
+                }
+            },
+            "battery_health_state": {
+                "state": {
+                    "ok": "OK",
+                    "replace": "Replace"
+                }
+            }
+        }
+    }
+}
