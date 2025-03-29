@@ -103,22 +103,7 @@ class NestClimate(ClimateEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _unit_of_measurement = UnitOfTemperature.CELSIUS
     
-    _attr_supported_features = (
-        ClimateEntityFeature.TARGET_TEMPERATURE |
-        ClimateEntityFeature.TARGET_TEMPERATURE_RANGE |
-        ClimateEntityFeature.FAN_MODE |
-        ClimateEntityFeature.PRESET_MODE
-    )
-
-    _attr_hvac_modes = [
-        HVACMode.HEAT,
-        HVACMode.COOL,
-        HVACMode.HEAT_COOL,
-        HVACMode.OFF,
-    ]
-    
     _attr_preset_modes = PRESET_MODES
-    _attr_fan_modes = [FAN_ON, FAN_AUTO]  # Updated fan modes
 
     def __init__(self, device_id, api):
         """Initialize the thermostat."""
@@ -127,6 +112,20 @@ class NestClimate(ClimateEntity):
             self.device_id = device_id
             self.device = api
             self._attr_unique_id = device_id
+
+            # Set supported features based on device capabilities
+            supported_features = (
+                ClimateEntityFeature.TARGET_TEMPERATURE |
+                ClimateEntityFeature.TARGET_TEMPERATURE_RANGE |
+                ClimateEntityFeature.PRESET_MODE
+            )
+
+            # Add fan support only if device has a fan
+            if api.device_data[device_id].get('has_fan', False):
+                supported_features |= ClimateEntityFeature.FAN_MODE
+                self._attr_fan_modes = [FAN_ON, FAN_AUTO]
+            
+            self._attr_supported_features = supported_features
             
             # Verify device data is available
             if self.device_id not in self.device.device_data:
@@ -253,13 +252,63 @@ class NestClimate(ClimateEntity):
             return HVACAction.IDLE
 
     @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return the list of available hvac operation modes."""
+        try:
+            modes = [HVACMode.OFF]  # Always include OFF
+            device_data = self.device.device_data[self.device_id]
+            
+            if device_data.get('can_heat', False):
+                modes.append(HVACMode.HEAT)
+                
+            if device_data.get('can_cool', False):
+                modes.append(HVACMode.COOL)
+                
+            if device_data.get('can_heat', False) and device_data.get('can_cool', False):
+                modes.append(HVACMode.HEAT_COOL)
+            
+            _LOGGER.debug(f"Device {self.device_id} available modes: {modes}")
+            return modes
+        except Exception as e:
+            _LOGGER.error(f"Error getting hvac_modes: {str(e)}")
+            return [HVACMode.OFF]
+
+    @property
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode."""
         try:
-            return HVAC_MODE_MAP.get(
-                self.device.device_data[self.device_id].get('hvac_mode', 'off'),
-                HVACMode.OFF
+            device_data = self.device.device_data[self.device_id]
+            mode = device_data.get('hvac_mode', 'off')
+            can_heat = device_data.get('can_heat', False)
+            can_cool = device_data.get('can_cool', False)
+            
+            _LOGGER.debug(
+                f"Device {self.device_id} capabilities - "
+                f"Mode: {mode}, Can Heat: {can_heat}, Can Cool: {can_cool}"
             )
+
+            # If the device can't heat or cool, force OFF mode
+            if not can_heat and not can_cool:
+                _LOGGER.debug(f"Device {self.device_id} has no heating/cooling capability")
+                return HVACMode.OFF
+
+            # Map the mode based on capabilities
+            mapped_mode = HVAC_MODE_MAP.get(mode, HVACMode.OFF)
+            
+            # Validate the mapped mode against capabilities
+            if mapped_mode == HVACMode.HEAT and not can_heat:
+                _LOGGER.debug(f"Device {self.device_id} cannot heat, forcing OFF mode")
+                return HVACMode.OFF
+            elif mapped_mode == HVACMode.COOL and not can_cool:
+                _LOGGER.debug(f"Device {self.device_id} cannot cool, forcing OFF mode")
+                return HVACMode.OFF
+            elif mapped_mode == HVACMode.HEAT_COOL and not (can_heat and can_cool):
+                _LOGGER.debug(f"Device {self.device_id} cannot heat and cool, forcing OFF mode")
+                return HVACMode.OFF
+                
+            _LOGGER.debug(f"Device {self.device_id} final mode: {mapped_mode}")
+            return mapped_mode
+                
         except (KeyError, AttributeError) as e:
             _LOGGER.error(f"Error getting hvac_mode: {str(e)}")
             return HVACMode.OFF
@@ -316,7 +365,13 @@ class NestClimate(ClimateEntity):
     def set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
         try:
+            # Check if the requested mode is supported by the device
+            if hvac_mode not in self.hvac_modes:
+                _LOGGER.error(f"HVAC mode {hvac_mode} not supported by device {self.device_id}")
+                return
+
             if hvac_mode in MODE_HASS_TO_NEST:
+                _LOGGER.debug(f"Setting {self.device_id} to mode: {hvac_mode}")
                 self.device.thermostat_set_mode(
                     self.device_id,
                     MODE_HASS_TO_NEST[hvac_mode],
