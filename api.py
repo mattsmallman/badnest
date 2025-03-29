@@ -308,9 +308,12 @@ class NestAPI():
                 # Thermostats, pt 2
                 elif bucket["object_key"].startswith(
                         f"device.{sn}"):
+                    _LOGGER.debug(f"Processing device data for thermostat {sn}")
+                    _LOGGER.debug(f"Raw thermostat data: {sensor_data}")
                     self.device_data[sn]['name'] = self._wheres[
                         sensor_data['where_id']
                     ]
+
                     # When acts as a sensor
                     if 'backplate_temperature' in sensor_data:
                         self.device_data[sn]['temperature'] = \
@@ -360,6 +363,8 @@ class NestAPI():
                 # Protect
                 elif bucket["object_key"].startswith(
                         f"topaz.{sn}"):
+                    _LOGGER.debug(f"Processing protect data for {sn}")
+                    _LOGGER.debug(f"Raw protect data: {sensor_data}")
                     self.device_data[sn]['name'] = self._wheres[
                         sensor_data['where_id']
                     ]
@@ -376,6 +381,8 @@ class NestAPI():
                 # Temperature sensors
                 elif bucket["object_key"].startswith(
                         f"kryptonite.{sn}"):
+                    _LOGGER.debug(f"Processing temperature sensor data for {sn}")
+                    _LOGGER.debug(f"Raw temperature sensor data: {sensor_data}")
                     self.device_data[sn]['name'] = self._wheres[
                         sensor_data['where_id']
                     ]
@@ -390,6 +397,8 @@ class NestAPI():
                 # Cameras
                 elif bucket["object_key"].startswith(
                         f"quartz.{sn}"):
+                    _LOGGER.debug(f"Processing camera data for {sn}")
+                    _LOGGER.debug(f"Raw camera data: {sensor_data}")
                     self.device_data[sn]['name'] = self._wheres[sensor_data['where_id']]
                     self.device_data[sn]['model'] = \
                         sensor_data["model"]

@@ -25,35 +25,35 @@ from homeassistant.components.sensor import SensorDeviceClass
 
 from .const import DOMAIN
 
-HVAC_MODE_MAP = {
-    "heat": HVACMode.HEAT,
-    "cool": HVACMode.COOL,
-    "heat-cool": HVACMode.HEAT_COOL,
-    "eco": HVACMode.AUTO,
-    "off": HVACMode.OFF,
-}
+# Nest mode constants
+NEST_MODE_HEAT_COOL = "range"
+NEST_MODE_ECO = "eco"
+NEST_MODE_HEAT = "heat"
+NEST_MODE_COOL = "cool"
+NEST_MODE_OFF = "off"
 
-# Map Home Assistant modes to their Nest equivalents
+# Alternative mode format sometimes used by Nest
+NEST_MODE_HEAT_COOL_ALT = "heat-cool"
+
 # Map Home Assistant modes to Nest modes
 MODE_HASS_TO_NEST = {
-    HVACMode.HEAT_COOL: "range",  # heat-cool
-    HVACMode.COOL: "cool",
-    HVACMode.HEAT: "heat",
-    HVACMode.OFF: "off",
+    HVACMode.HEAT_COOL: NEST_MODE_HEAT_COOL,
+    HVACMode.COOL: NEST_MODE_COOL,
+    HVACMode.HEAT: NEST_MODE_HEAT,
+    HVACMode.OFF: NEST_MODE_OFF,
 }
 
 # Map Nest modes to Home Assistant modes
 MODE_NEST_TO_HASS = {
-    "range": HVACMode.HEAT_COOL,
-    "cool": HVACMode.COOL,
-    "heat": HVACMode.HEAT,
-    "off": HVACMode.OFF,
-    # Add explicit mapping for additional Nest modes
-    "eco": HVACMode.OFF,  # Map eco to OFF since we handle eco separately
-    "heat-cool": HVACMode.HEAT_COOL,  # Alternative format sometimes used
+    NEST_MODE_HEAT_COOL: HVACMode.HEAT_COOL,
+    NEST_MODE_COOL: HVACMode.COOL,
+    NEST_MODE_HEAT: HVACMode.HEAT,
+    NEST_MODE_OFF: HVACMode.OFF,
+    NEST_MODE_ECO: HVACMode.OFF,  # Map eco to OFF since we handle eco separately
+    NEST_MODE_HEAT_COOL_ALT: HVACMode.HEAT_COOL,  # Alternative format
 }
 
-# Update fan mode mapping to use new constants
+# Fan mode mapping
 FAN_MODE_MAP = {
     "on": FAN_ON,
     "auto": FAN_AUTO,
@@ -66,8 +66,6 @@ ACTION_NEST_TO_HASS = {
     "cooling": HVACAction.COOLING,
 }
 
-MODE_NEST_TO_HASS = {v: k for k, v in MODE_HASS_TO_NEST.items()}
-
 ROUND_TARGET_HUMIDITY_TO_NEAREST = 5
 NEST_HUMIDITY_MIN = 10
 NEST_HUMIDITY_MAX = 60
@@ -76,7 +74,6 @@ NEST_HUMIDITY_MAX = 60
 PRESET_MODES = [PRESET_NONE, PRESET_ECO]
 
 _LOGGER = logging.getLogger(__name__)
-
 
 async def async_setup_platform(hass,
                                config,
@@ -101,7 +98,6 @@ async def async_setup_platform(hass,
     except Exception as e:
         _LOGGER.error(f"Failed to setup Nest climate platform: {str(e)}")
         return False
-
 
 class NestClimate(ClimateEntity):
     """Nest climate device."""
@@ -286,14 +282,13 @@ class NestClimate(ClimateEntity):
         try:
             device_data = self.device.device_data[self.device_id]
             mode = device_data.get('mode', 'off')
-            hvac_mode = device_data.get('hvac_mode', 'off')
             
             _LOGGER.debug(
                 f"Determining HVAC mode - "
                 f"Raw mode: {mode}, "
-                f"HVAC mode: {hvac_mode}, "
                 f"Current data: {device_data}"
             )
+            
             can_heat = device_data.get('can_heat', False)
             can_cool = device_data.get('can_cool', False)
             
@@ -307,9 +302,8 @@ class NestClimate(ClimateEntity):
                 _LOGGER.debug(f"Device {self.device_id} has no heating/cooling capability")
                 return HVACMode.OFF
 
-            # Try to map the mode, checking both 'mode' and 'hvac_mode'
-            mapped_mode = MODE_NEST_TO_HASS.get(mode) or HVAC_MODE_MAP.get(hvac_mode, HVACMode.OFF)
-            
+            # Try to map the mode
+            mapped_mode = MODE_NEST_TO_HASS.get(mode, HVACMode.OFF)
             _LOGGER.debug(f"Initial mode mapping: {mode} -> {mapped_mode}")
             
             # Validate the mapped mode against capabilities
@@ -323,10 +317,10 @@ class NestClimate(ClimateEntity):
                 _LOGGER.debug(f"Device {self.device_id} cannot heat and cool, forcing OFF mode")
                 return HVACMode.OFF
                 
-                _LOGGER.debug(
-                    f"Device {self.device_id} final mode: {mapped_mode} "
-                    f"(can_heat: {can_heat}, can_cool: {can_cool})"
-                )
+            _LOGGER.debug(
+                f"Device {self.device_id} final mode: {mapped_mode} "
+                f"(can_heat: {can_heat}, can_cool: {can_cool})"
+            )
             return mapped_mode
                 
         except (KeyError, AttributeError) as e:
@@ -459,8 +453,11 @@ class NestClimate(ClimateEntity):
             _LOGGER.debug(
                 f"Device {self.device_id} update - "
                 f"Mode: {device_data.get('mode')}, "
-                f"HvacMode: {device_data.get('hvac_mode')}, "
                 f"Action: {device_data.get('action')}, "
+                f"Current temp: {device_data.get('current_temperature')}, "
+                f"Target temp: {device_data.get('target_temperature')}, "
+                f"Can heat: {device_data.get('can_heat')}, "
+                f"Can cool: {device_data.get('can_cool')}, "
                 f"Eco: {device_data.get('eco', False)}"
             )
             
