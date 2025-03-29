@@ -36,12 +36,6 @@ SENSOR_DESCRIPTIONS = {
         icon="mdi:molecule-co",
         name="CO Status",
     ),
-    "heat_status": SensorEntityDescription(
-        key="heat_status",
-        device_class=SensorDeviceClass.ENUM,
-        icon="mdi:fire",
-        name="Heat Status",
-    ),
     "smoke_status": SensorEntityDescription(
         key="smoke_status",
         device_class=SensorDeviceClass.ENUM,
@@ -56,7 +50,7 @@ SENSOR_DESCRIPTIONS = {
     ),
 }
 
-PROTECT_SENSOR_TYPES = ["co_status", "smoke_status", "battery_health_state", "heat_status"]
+PROTECT_SENSOR_TYPES = ["co_status", "smoke_status", "battery_health_state"]
 
 async def async_setup_entry(
     hass: HomeAssistant,
