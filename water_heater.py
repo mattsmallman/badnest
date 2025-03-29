@@ -115,6 +115,31 @@ class NestWaterHeater(WaterHeaterEntity):
     _attr_has_entity_name = True
     _attr_supported_features = SUPPORTED_FEATURES
 
+    @property
+    def current_temperature(self) -> None:
+        """Return None as this water heater doesn't report temperature."""
+        return None
+
+    @property
+    def target_temperature(self) -> None:
+        """Return None as this water heater doesn't support target temperature."""
+        return None
+
+    @property
+    def min_temp(self) -> None:
+        """Return None as this water heater doesn't support temperature range."""
+        return None
+
+    @property
+    def max_temp(self) -> None:
+        """Return None as this water heater doesn't support temperature range."""
+        return None
+
+    @property
+    def temperature_unit(self) -> None:
+        """Return None as this water heater doesn't use temperature."""
+        return None
+
     def __init__(self, device_id: str, api, entry_id: str) -> None:
         """Initialize the water heater."""
         self.device_id = device_id
