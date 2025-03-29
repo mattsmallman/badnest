@@ -32,13 +32,11 @@ SENSOR_TYPES = {
     },
     "co_status": {
         "device_class": SensorDeviceClass.ENUM,
-        "state_class": SensorStateClass.MEASUREMENT,
         "icon": "mdi:molecule-co",
         "name": "CO Status",
     },
     "smoke_status": {
         "device_class": SensorDeviceClass.ENUM,
-        "state_class": SensorStateClass.MEASUREMENT,
         "icon": "mdi:smoke-detector",
         "name": "Smoke Status",
     },
@@ -118,7 +116,8 @@ class NestProtectSensor(SensorEntity):
         self.device = api
         
         self._attr_device_class = SENSOR_TYPES[sensor_type]["device_class"]
-        self._attr_state_class = SENSOR_TYPES[sensor_type]["state_class"]
+        if "state_class" in SENSOR_TYPES[sensor_type]:
+            self._attr_state_class = SENSOR_TYPES[sensor_type]["state_class"]
         self._attr_icon = SENSOR_TYPES[sensor_type]["icon"]
         self._attr_name = f"{self.device.device_data[device_id]['name']} {SENSOR_TYPES[sensor_type]['name']}"
 
