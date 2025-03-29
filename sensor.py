@@ -191,7 +191,6 @@ class NestTemperatureSensor(NestBaseSensor):
             configuration_url=NEST_HOME_URL,
             via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
-            manufacturer_url=NEST_STORE_URL_TEMP,
             serial_number=self.device_id,
             suggested_type="sensor",
         )
@@ -275,12 +274,8 @@ class NestProtectSensor(SensorEntity):
             configuration_url=NEST_HOME_URL,
             via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
-            manufacturer_url=NEST_STORE_URL_PROTECT,
             serial_number=self.device_id,
             suggested_type="smoke",
-            production_date=data.get('device_born_on_date_utc_secs'),
-            removal_date=data.get('replace_by_date_utc_secs'),
-            translation_key=data.get('device_locale')
         )
 
     @property
@@ -305,6 +300,12 @@ class NestProtectSensor(SensorEntity):
                 "continuous": data.get('night_light_continuous')
             },
             "steam_detection_enable": data.get('steam_detection_enable'),
+            "device_lifecycle": {
+                "born_on_date": data.get('device_born_on_date_utc_secs'),
+                "replace_by_date": data.get('replace_by_date_utc_secs'),
+                "locale": data.get('device_locale'),
+                "installed_locale": data.get('installed_locale'),
+            },
             "component_tests": {
                 "smoke": data.get('component_smoke_test_passed'),
                 "co": data.get('component_co_test_passed'),
