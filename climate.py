@@ -80,11 +80,20 @@ async def async_setup_platform(hass,
 
     thermostats = []
     _LOGGER.info("Adding thermostats")
-    for thermostat in api['thermostats']:
-        _LOGGER.info(f"Adding nest thermostat uuid: {thermostat}")
-        thermostats.append(NestClimate(thermostat, api))
+    try:
+        for thermostat in api.thermostats:  # Access thermostats as property
+            _LOGGER.info(f"Adding nest thermostat uuid: {thermostat}")
+            thermostats.append(NestClimate(thermostat, api))
 
-    async_add_entities(thermostats)
+        if not thermostats:
+            _LOGGER.warning("No thermostats found in Nest API response")
+            return False
+
+        async_add_entities(thermostats)
+        return True
+    except Exception as e:
+        _LOGGER.error(f"Failed to setup Nest climate platform: {str(e)}")
+        return False
 
 
 class NestClimate(ClimateEntity):
@@ -92,6 +101,7 @@ class NestClimate(ClimateEntity):
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _unit_of_measurement = UnitOfTemperature.CELSIUS
     
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE |
@@ -113,10 +123,27 @@ class NestClimate(ClimateEntity):
     def __init__(self, device_id, api):
         """Initialize the thermostat."""
         super().__init__()
-        self._attr_name = "Nest Thermostat"
-        self.device_id = device_id
-        self.device = api
-        self._attr_unique_id = device_id
+        try:
+            self.device_id = device_id
+            self.device = api
+            self._attr_unique_id = device_id
+            
+            # Verify device data is available
+            if self.device_id not in self.device.device_data:
+                raise KeyError(f"No device data found for thermostat {device_id}")
+                
+            self._attr_name = self.device.device_data[self.device_id].get('name', "Nest Thermostat")
+            
+            # Initialize required properties
+            self._attr_current_temperature = None
+            self._attr_target_temperature = None
+            self._attr_target_temperature_high = None
+            self._attr_target_temperature_low = None
+            self._attr_current_humidity = None
+            
+        except Exception as e:
+            _LOGGER.error(f"Failed to initialize Nest climate device: {str(e)}")
+            raise
 
     @property
     def unique_id(self):
@@ -141,17 +168,29 @@ class NestClimate(ClimateEntity):
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        return self.device.device_data[self.device_id]['current_temperature']
+        try:
+            return self.device.device_data[self.device_id]['current_temperature']
+        except KeyError:
+            _LOGGER.error(f"Missing current_temperature data for {self.device_id}")
+            return None
 
     @property
     def current_humidity(self):
         """Return the current humidity."""
-        return self.device.device_data[self.device_id]['current_humidity']
+        try:
+            return self.device.device_data[self.device_id]['current_humidity']
+        except KeyError:
+            _LOGGER.error(f"Missing current_humidity data for {self.device_id}")
+            return None
 
     @property
     def target_humidity(self):
         """Return the target humidity."""
-        return self.device.device_data[self.device_id]['target_humidity']
+        try:
+            return self.device.device_data[self.device_id]['target_humidity']
+        except KeyError:
+            _LOGGER.error(f"Missing target_humidity data for {self.device_id}")
+            return None
 
     @property
     def min_humidity(self):
@@ -166,122 +205,162 @@ class NestClimate(ClimateEntity):
     @property
     def target_temperature(self):
         """Return the temperature we try to reach."""
-        if self.device.device_data[self.device_id]['mode'] \
-                != NEST_MODE_HEAT_COOL \
-                and not self.device.device_data[self.device_id]['eco']:
-            return \
-                self.device.device_data[self.device_id]['target_temperature']
-        return None
+        try:
+            device_data = self.device.device_data[self.device_id]
+            if device_data.get('mode') != NEST_MODE_HEAT_COOL and not device_data.get('eco', False):
+                return device_data.get('target_temperature')
+            return None
+        except (KeyError, AttributeError) as e:
+            _LOGGER.error(f"Error getting target_temperature: {str(e)}")
+            return None
 
     @property
     def target_temperature_high(self):
         """Return the highbound target temperature we try to reach."""
-        if self.device.device_data[self.device_id]['mode'] \
-                == NEST_MODE_HEAT_COOL \
-                and not self.device.device_data[self.device_id]['eco']:
-            return \
-                self.device. \
-                device_data[self.device_id]['target_temperature_high']
-        return None
+        try:
+            device_data = self.device.device_data[self.device_id]
+            if device_data.get('mode') == NEST_MODE_HEAT_COOL and not device_data.get('eco', False):
+                return device_data.get('target_temperature_high')
+            return None
+        except (KeyError, AttributeError) as e:
+            _LOGGER.error(f"Error getting target_temperature_high: {str(e)}")
+            return None
 
     @property
     def target_temperature_low(self):
         """Return the lowbound target temperature we try to reach."""
-        if self.device.device_data[self.device_id]['mode'] \
-                == NEST_MODE_HEAT_COOL \
-                and not self.device.device_data[self.device_id]['eco']:
-            return \
-                self.device. \
-                device_data[self.device_id]['target_temperature_low']
-        return None
+        try:
+            device_data = self.device.device_data[self.device_id]
+            if device_data.get('mode') == NEST_MODE_HEAT_COOL and not device_data.get('eco', False):
+                return device_data.get('target_temperature_low')
+            return None
+        except (KeyError, AttributeError) as e:
+            _LOGGER.error(f"Error getting target_temperature_low: {str(e)}")
+            return None
 
     @property
     def hvac_action(self) -> HVACAction:
         """Return current operation ie. heat, cool, idle."""
-        return ACTION_NEST_TO_HASS[
-            self.device.device_data[self.device_id]['action']
-        ]
+        try:
+            action = self.device.device_data[self.device_id].get('action', 'off')
+            return ACTION_NEST_TO_HASS.get(action, HVACAction.IDLE)
+        except (KeyError, AttributeError) as e:
+            _LOGGER.error(f"Error getting hvac_action: {str(e)}")
+            return HVACAction.IDLE
 
     @property
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode."""
-        return HVAC_MODE_MAP.get(
-            self.device.device_data[self.device_id]['hvac_mode'],
-            HVACMode.OFF
-        )
+        try:
+            return HVAC_MODE_MAP.get(
+                self.device.device_data[self.device_id].get('hvac_mode', 'off'),
+                HVACMode.OFF
+            )
+        except (KeyError, AttributeError) as e:
+            _LOGGER.error(f"Error getting hvac_mode: {str(e)}")
+            return HVACMode.OFF
 
     @property
     def fan_mode(self) -> str:
         """Return current fan mode."""
-        return FAN_MODE_MAP.get(
-            self.device.device_data[self.device_id]['fan_mode'],
-            FAN_AUTO  # Updated default
-        )
+        try:
+            return FAN_MODE_MAP.get(
+                self.device.device_data[self.device_id].get('fan_mode', 'auto'),
+                FAN_AUTO
+            )
+        except (KeyError, AttributeError) as e:
+            _LOGGER.error(f"Error getting fan_mode: {str(e)}")
+            return FAN_AUTO
 
     def set_temperature(self, **kwargs):
         """Set new target temperature."""
-        temp = None
-        target_temp_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
-        target_temp_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
-        if self.device.device_data[self.device_id]['mode'] == \
-                NEST_MODE_HEAT_COOL:
-            if target_temp_low is not None and target_temp_high is not None:
-                self.device.thermostat_set_temperature(
-                    self.device_id,
-                    target_temp_low,
-                    target_temp_high,
-                )
-        else:
-            temp = kwargs.get(ATTR_TEMPERATURE)
-            if temp is not None:
-                self.device.thermostat_set_temperature(
-                    self.device_id,
-                    temp,
-                )
+        try:
+            temp = None
+            target_temp_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
+            target_temp_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
+            current_mode = self.device.device_data[self.device_id].get('mode')
+            
+            if current_mode == NEST_MODE_HEAT_COOL:
+                if target_temp_low is not None and target_temp_high is not None:
+                    self.device.thermostat_set_temperature(
+                        self.device_id,
+                        target_temp_low,
+                        target_temp_high,
+                    )
+            else:
+                temp = kwargs.get(ATTR_TEMPERATURE)
+                if temp is not None:
+                    self.device.thermostat_set_temperature(
+                        self.device_id,
+                        temp,
+                    )
+        except Exception as e:
+            _LOGGER.error(f"Failed to set temperature: {str(e)}")
 
     def set_humidity(self, humidity):
         """Set new target humidity."""
-        humidity = int(round(float(humidity) / ROUND_TARGET_HUMIDITY_TO_NEAREST) * ROUND_TARGET_HUMIDITY_TO_NEAREST)
-        if humidity < NEST_HUMIDITY_MIN:
-            humidity = NEST_HUMIDITY_MIN
-        if humidity > NEST_HUMIDITY_MAX:
-            humidity = NEST_HUMIDITY_MAX
-        self.device.thermostat_set_target_humidity(
-            self.device_id,
-            humidity,
-        )
+        try:
+            humidity = int(round(float(humidity) / ROUND_TARGET_HUMIDITY_TO_NEAREST) * ROUND_TARGET_HUMIDITY_TO_NEAREST)
+            humidity = max(NEST_HUMIDITY_MIN, min(NEST_HUMIDITY_MAX, humidity))
+            self.device.thermostat_set_target_humidity(
+                self.device_id,
+                humidity,
+            )
+        except Exception as e:
+            _LOGGER.error(f"Failed to set humidity: {str(e)}")
 
     def set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
-        self.device.thermostat_set_mode(
-            self.device_id,
-            MODE_HASS_TO_NEST[hvac_mode],
-        )
+        try:
+            if hvac_mode in MODE_HASS_TO_NEST:
+                self.device.thermostat_set_mode(
+                    self.device_id,
+                    MODE_HASS_TO_NEST[hvac_mode],
+                )
+            else:
+                _LOGGER.error(f"Invalid HVAC mode: {hvac_mode}")
+        except Exception as e:
+            _LOGGER.error(f"Failed to set HVAC mode: {str(e)}")
 
     def set_fan_mode(self, fan_mode: str) -> None:
         """Turn fan on/off."""
-        if self.device.device_data[self.device_id]['has_fan']:
-            if fan_mode == FAN_ON:  # Updated comparison
-                self.device.thermostat_set_fan(
-                    self.device_id,
-                    int(datetime.now().timestamp() + 60 * 30),
-                )
+        try:
+            device_data = self.device.device_data[self.device_id]
+            has_fan = device_data.get('has_fan', False)
+            
+            if has_fan:
+                if fan_mode == FAN_ON:
+                    self.device.thermostat_set_fan(
+                        self.device_id,
+                        int(datetime.now().timestamp() + 60 * 30),
+                    )
+                else:
+                    self.device.thermostat_set_fan(
+                        self.device_id,
+                        0,
+                    )
             else:
-                self.device.thermostat_set_fan(
-                    self.device_id,
-                    0,
-                )
+                _LOGGER.warning(f"Device {self.device_id} does not have a fan")
+        except Exception as e:
+            _LOGGER.error(f"Failed to set fan mode: {str(e)}")
 
     def set_preset_mode(self, preset_mode: str) -> None:
         """Set preset mode."""
-        need_eco = preset_mode == PRESET_ECO
+        try:
+            need_eco = preset_mode == PRESET_ECO
+            current_eco = self.device.device_data[self.device_id].get('eco', False)
 
-        if need_eco != self.device.device_data[self.device_id]['eco']:
-            self.device.thermostat_set_eco_mode(
-                self.device_id,
-                need_eco,
-            )
+            if need_eco != current_eco:
+                self.device.thermostat_set_eco_mode(
+                    self.device_id,
+                    need_eco,
+                )
+        except Exception as e:
+            _LOGGER.error(f"Failed to set preset mode: {str(e)}")
 
     def update(self) -> None:
         """Updates data."""
-        self.device.update()
+        try:
+            self.device.update()
+        except Exception as e:
+            _LOGGER.error(f"Failed to update device data: {str(e)}")
