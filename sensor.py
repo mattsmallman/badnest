@@ -41,8 +41,7 @@ SENSOR_TYPES = {
         "name": "Smoke Status",
     },
     "battery_health_state": {  # Matches API data structure
-        "device_class": SensorDeviceClass.BATTERY,
-        "state_class": SensorStateClass.MEASUREMENT,
+        "device_class": SensorDeviceClass.ENUM,
         "icon": "mdi:battery",
         "name": "Battery Health",
     },
