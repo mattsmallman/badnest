@@ -166,11 +166,77 @@ class NestClimate(ClimateEntity):
             identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
             name=device_data.get('name', "Nest Thermostat"),
             manufacturer="Nest",
-            model="Thermostat",
-            sw_version=device_data.get('software_version'),
+            model=device_data.get('model_version', "Thermostat"),
+            sw_version=device_data.get('current_version'),
             suggested_area=device_data.get('where_name'),
             via_device=(DOMAIN, self._entry_id),
         )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return device specific state attributes."""
+        data = self.device.device_data[self.device_id]
+        return {
+            "hvac_system": {
+                "heater_source": data.get('heater_source'),
+                "heater_delivery": data.get('heater_delivery'),
+                "has_heat_pump": data.get('has_heat_pump'),
+                "has_fossil_fuel": data.get('has_fossil_fuel'),
+                "has_dehumidifier": data.get('has_dehumidifier'),
+                "has_humidifier": data.get('has_humidifier'),
+                "has_fan": data.get('has_fan'),
+                "equipment_type": data.get('equipment_type'),
+                "wiring": data.get('hvac_wires'),
+            },
+            "safety": {
+                "lower_safety_temp_enabled": data.get('lower_safety_temp_enabled'),
+                "lower_safety_temp": data.get('lower_safety_temp'),
+                "upper_safety_temp_enabled": data.get('upper_safety_temp_enabled'),
+                "upper_safety_temp": data.get('upper_safety_temp'),
+                "safety_state": data.get('safety_state'),
+                "hvac_safety_shutoff_active": data.get('hvac_safety_shutoff_active'),
+            },
+            "learning": {
+                "learning_mode": data.get('learning_mode'),
+                "learning_state": data.get('learning_state'),
+                "time_to_target": data.get('time_to_target'),
+                "time_to_target_training": data.get('time_to_target_training'),
+                "learning_days_completed_heat": data.get('learning_days_completed_heat'),
+                "learning_days_completed_cool": data.get('learning_days_completed_cool'),
+            },
+            "eco": {
+                "mode": data.get('eco', {}).get('mode'),
+                "mode_update_timestamp": data.get('eco', {}).get('mode_update_timestamp'),
+                "leaf_away_high": data.get('leaf_away_high'),
+                "leaf_away_low": data.get('leaf_away_low'),
+                "leaf_threshold_cool": data.get('leaf_threshold_cool'),
+                "leaf_threshold_heat": data.get('leaf_threshold_heat'),
+            },
+            "hardware": {
+                "backplate_model": data.get('backplate_model'),
+                "backplate_serial": data.get('backplate_serial_number'),
+                "heat_link_model": data.get('heat_link_model'),
+                "heat_link_serial": data.get('heat_link_serial_number'),
+                "heat_link_version": data.get('heat_link_sw_version'),
+                "locale": data.get('device_locale'),
+            },
+            "network": {
+                "local_ip": data.get('local_ip'),
+                "mac_address": data.get('mac_address'),
+                "rssi": data.get('rssi'),
+            },
+            "temperature_scale": data.get('temperature_scale'),
+            "sunlight_correction": {
+                "enabled": data.get('sunlight_correction_enabled'),
+                "active": data.get('sunlight_correction_active'),
+                "ready": data.get('sunlight_correction_ready'),
+            },
+            "preconditioning": {
+                "enabled": data.get('preconditioning_enabled'),
+                "active": data.get('preconditioning_active'),
+                "ready": data.get('preconditioning_ready'),
+            }
+        }
 
     @property
     def hvac_mode(self) -> HVACMode:
