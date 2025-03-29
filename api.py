@@ -385,79 +385,316 @@ class NestAPI:
 
     async def thermostat_set_temperature(self, device_id: str, target_temp: float, target_temp_high: float = None) -> None:
         """Set target temperature or range for thermostat."""
-        if target_temp_high is not None:
-            data = {
-                "target_temperature_low": target_temp,
-                "target_temperature_high": target_temp_high,
-                "target_temperature_type": "range"
-            }
-        else:
-            data = {
-                "target_temperature": target_temp,
-                "target_temperature_type": self.device_data[device_id]['mode']
-            }
+        if device_id not in self.thermostats:
+            return
 
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/temperature",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json=data
-        )
+        try:
+            if target_temp_high is not None:
+                value = {
+                    "target_temperature_low": target_temp,
+                    "target_temperature_high": target_temp_high,
+                    "target_temperature_type": "range"
+                }
+            else:
+                value = {
+                    "target_temperature": target_temp,
+                    "target_temperature_type": self.device_data[device_id]['mode']
+                }
+
+            data = {
+                "objects": [{
+                    "object_key": f"shared.{device_id}",
+                    "op": "MERGE",
+                    "value": value
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set temperature: {str(e)}")
+            await self.login()
+            await self.thermostat_set_temperature(device_id, target_temp, target_temp_high)
 
     async def thermostat_set_mode(self, device_id: str, mode: str) -> None:
         """Set operation mode for thermostat."""
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/temperature_mode",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json={"target_temperature_type": mode}
-        )
+        if device_id not in self.thermostats:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"shared.{device_id}",
+                    "op": "MERGE",
+                    "value": {"target_temperature_type": mode}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set mode: {str(e)}")
+            await self.login()
+            await self.thermostat_set_mode(device_id, mode)
 
     async def thermostat_set_fan(self, device_id: str, end_timestamp: int) -> None:
         """Set fan timer for thermostat."""
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/fan_timer",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json={"fan_timer_timeout": end_timestamp}
-        )
+        if device_id not in self.thermostats:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"device.{device_id}",
+                    "op": "MERGE",
+                    "value": {"fan_timer_timeout": end_timestamp}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set fan: {str(e)}")
+            await self.login()
+            await self.thermostat_set_fan(device_id, end_timestamp)
 
     async def thermostat_set_eco_mode(self, device_id: str, eco_enable: bool) -> None:
         """Set eco mode for thermostat."""
-        mode = "manual-eco" if eco_enable else "schedule"
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/eco",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json={"mode": mode}
-        )
+        if device_id not in self.thermostats:
+            return
+
+        try:
+            mode = "manual-eco" if eco_enable else "schedule"
+            data = {
+                "objects": [{
+                    "object_key": f"device.{device_id}",
+                    "op": "MERGE",
+                    "value": {"eco": {"mode": mode}}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set eco mode: {str(e)}")
+            await self.login()
+            await self.thermostat_set_eco_mode(device_id, eco_enable)
 
     async def hotwater_set_mode(self, device_id: str, mode: str) -> None:
         """Set hot water operation mode."""
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/hot_water_mode",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json={"mode": mode}
-        )
+        if device_id not in self.hotwatercontrollers:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"device.{device_id}",
+                    "op": "MERGE",
+                    "value": {"hot_water_mode": mode}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set hot water mode: {str(e)}")
+            await self.login()
+            await self.hotwater_set_mode(device_id, mode)
 
     async def hotwater_set_away_mode(self, device_id: str, away_mode: bool) -> None:
         """Set hot water away mode."""
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/hot_water_away",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json={"away_enabled": away_mode}
-        )
+        if device_id not in self.hotwatercontrollers:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"device.{device_id}",
+                    "op": "MERGE",
+                    "value": {"hot_water_away_enabled": away_mode}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set hot water away mode: {str(e)}")
+            await self.login()
+            await self.hotwater_set_away_mode(device_id, away_mode)
 
     async def hotwater_set_boost(self, device_id: str, time: int) -> None:
         """Set hot water boost mode with end timestamp."""
-        await self._do_request(
-            'POST',
-            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/hot_water_boost",
-            headers={"Authorization": f"Basic {self._access_token}"},
-            json={"time_to_end": time}
-        )
+        if device_id not in self.hotwatercontrollers:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"device.{device_id}",
+                    "op": "MERGE",
+                    "value": {"hot_water_boost_time_to_end": time}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to set hot water boost: {str(e)}")
+            await self.login()
+            await self.hotwater_set_boost(device_id, time)
+
+    async def camera_turn_off(self, device_id: str) -> None:
+        """Turn off camera streaming."""
+        if device_id not in self.cameras:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"quartz.{device_id}",
+                    "op": "MERGE",
+                    "value": {"streaming.enabled": False}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to turn off camera: {str(e)}")
+            await self.login()
+            await self.camera_turn_off(device_id)
+
+    async def camera_turn_on(self, device_id: str) -> None:
+        """Turn on camera streaming."""
+        if device_id not in self.cameras:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"quartz.{device_id}",
+                    "op": "MERGE",
+                    "value": {"streaming.enabled": True}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to turn on camera: {str(e)}")
+            await self.login()
+            await self.camera_turn_on(device_id)
+
+    async def camera_get_image(self, device_id: str, now: int) -> bytes | None:
+        """Return a still image response from the camera."""
+        if device_id not in self.cameras:
+            return None
+
+        try:
+            headers = {
+                'User-Agent': USER_AGENT,
+                'X-Requested-With': 'XmlHttpRequest',
+                'Referer': 'https://home.nest.com/',
+                'cookie': f"user_token={self._access_token}"
+            }
+            
+            response = await self._do_request(
+                'GET',
+                f"{self._camera_url}/get_image?uuid={device_id}&cachebuster={now}",
+                headers=headers
+            )
+            
+            return response.content
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to get camera image: {str(e)}")
+            await self.login()
+            return await self.camera_get_image(device_id, now)
+
+    async def camera_turn_chime_off(self, device_id: str) -> None:
+        """Turn off camera indoor chime."""
+        if device_id not in self.switches:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"quartz.{device_id}",
+                    "op": "MERGE",
+                    "value": {"doorbell.indoor_chime.enabled": False}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to turn off camera chime: {str(e)}")
+            await self.login()
+            await self.camera_turn_chime_off(device_id)
+
+    async def camera_turn_chime_on(self, device_id: str) -> None:
+        """Turn on camera indoor chime."""
+        if device_id not in self.switches:
+            return
+
+        try:
+            data = {
+                "objects": [{
+                    "object_key": f"quartz.{device_id}",
+                    "op": "MERGE",
+                    "value": {"doorbell.indoor_chime.enabled": True}
+                }]
+            }
+            
+            await self._do_request(
+                'POST',
+                f"{self._czfe_url}/v5/put",
+                headers={"Authorization": f"Basic {self._access_token}"},
+                json=data
+            )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Failed to turn on camera chime: {str(e)}")
+            await self.login()
+            await self.camera_turn_chime_on(device_id)
 
     async def close(self) -> None:
         """Close the session."""
