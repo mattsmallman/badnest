@@ -36,6 +36,12 @@ SENSOR_DESCRIPTIONS = {
         icon="mdi:molecule-co",
         name="CO Status",
     ),
+    "heat_status": SensorEntityDescription(
+        key="heat_status",
+        device_class=SensorDeviceClass.ENUM,
+        icon="mdi:fire",
+        name="Heat Status",
+    ),
     "smoke_status": SensorEntityDescription(
         key="smoke_status",
         device_class=SensorDeviceClass.ENUM,
@@ -50,7 +56,7 @@ SENSOR_DESCRIPTIONS = {
     ),
 }
 
-PROTECT_SENSOR_TYPES = ["co_status", "smoke_status", "battery_health_state"]
+PROTECT_SENSOR_TYPES = ["co_status", "smoke_status", "battery_health_state", "heat_status"]
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -170,6 +176,56 @@ class NestProtectSensor(SensorEntity):
     def native_value(self):
         """Return the state of the sensor."""
         return self.device.device_data[self.device_id][self._sensor_type]
+
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes."""
+        data = self.device.device_data[self.device_id]
+        return {
+            ATTR_BATTERY_LEVEL: data.get('battery_level'),
+            "device_model": data.get('model'),
+            "creation_time": data.get('creation_time'),
+            "last_test_start": data.get('latest_manual_test_start_utc_secs'),
+            "last_test_end": data.get('latest_manual_test_end_utc_secs'),
+            "last_audio_test_start": data.get('last_audio_self_test_start_utc_secs'),
+            "last_audio_test_end": data.get('last_audio_self_test_end_utc_secs'),
+            "auto_away": data.get('auto_away'),
+            "night_light": {
+                "enabled": data.get('night_light_enable'),
+                "brightness": data.get('night_light_brightness'),
+                "continuous": data.get('night_light_continuous')
+            },
+            "steam_detection_enable": data.get('steam_detection_enable'),
+            "born_on_date": data.get('device_born_on_date_utc_secs'),
+            "replace_by_date": data.get('replace_by_date_utc_secs'),
+            "kl_software_version": data.get('kl_software_version'),
+            "device_info": {
+                "color": data.get('device_external_color'),
+                "locale": data.get('device_locale'),
+                "installed_locale": data.get('installed_locale')
+            },
+            "component_tests": {
+                "smoke": data.get('component_smoke_test_passed'),
+                "co": data.get('component_co_test_passed'),
+                "heat": data.get('component_heat_test_passed'),
+                "humidity": data.get('component_hum_test_passed'),
+                "temperature": data.get('component_temp_test_passed'),
+                "pir": data.get('component_pir_test_passed'),
+                "audio": data.get('component_speaker_test_passed'),
+                "wifi": data.get('component_wifi_test_passed')
+            },
+            "network": {
+                "wifi": {
+                    "ip": data.get('wifi_ip_address'),
+                    "mac": data.get('wifi_mac_address'),
+                    "regulatory_domain": data.get('wifi_regulatory_domain')
+                },
+                "thread": {
+                    "ip": data.get('thread_ip_address'),
+                    "mac": data.get('thread_mac_address')
+                }
+            }
+        }
 
     async def async_update(self):
         """Get the latest data and update the state."""
