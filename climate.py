@@ -161,15 +161,47 @@ class NestClimate(ClimateEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device information."""
-        device_data = self.device.device_data[self.device_id]
+        data = self.device.device_data[self.device_id]
+        
+        # Collect MAC addresses for connections
+        connections = set()
+        if mac := data.get("mac_address"):
+            connections.add(("mac", mac))
+            
+        # Build model info
+        model = data.get('model_version', "Thermostat")
+        if backplate := data.get('backplate_model'):
+            model = f"{model} with {backplate}"
+            
+        # Combine software versions
+        sw_version = data.get('current_version')
+        if heat_link_version := data.get('heat_link_sw_version'):
+            sw_version = f"{sw_version} (Heat Link: {heat_link_version})" if sw_version else heat_link_version
+            
+        # Get hardware serials
+        serials = []
+        if main_serial := self.device_id:
+            serials.append(main_serial)
+        if backplate_serial := data.get('backplate_serial_number'):
+            serials.append(f"Backplate: {backplate_serial}")
+        if heat_link_serial := data.get('heat_link_serial_number'):
+            serials.append(f"Heat Link: {heat_link_serial}")
+        serial_number = ", ".join(serials)
+            
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
-            name=device_data.get('name', "Nest Thermostat"),
+            name=data.get('name', "Nest Thermostat"),
             manufacturer="Nest",
-            model=device_data.get('model_version', "Thermostat"),
-            sw_version=device_data.get('current_version'),
-            suggested_area=device_data.get('where_name'),
+            model=model,
+            sw_version=sw_version,
+            hw_version=data.get('backplate_bsl_version'),
+            suggested_area=data.get('where_name'),
+            configuration_url="https://home.nest.com",
+            manufacturer_url="https://store.google.com/product/nest_learning_thermostat",
             via_device=(DOMAIN, self._entry_id),
+            connections=connections,
+            serial_number=serial_number,
+            suggested_type="thermostat",
         )
 
     @property
@@ -211,19 +243,11 @@ class NestClimate(ClimateEntity):
                 "leaf_threshold_cool": data.get('leaf_threshold_cool'),
                 "leaf_threshold_heat": data.get('leaf_threshold_heat'),
             },
-            "hardware": {
-                "backplate_model": data.get('backplate_model'),
-                "backplate_serial": data.get('backplate_serial_number'),
-                "heat_link_model": data.get('heat_link_model'),
-                "heat_link_serial": data.get('heat_link_serial_number'),
-                "heat_link_version": data.get('heat_link_sw_version'),
-                "locale": data.get('device_locale'),
-            },
             "network": {
                 "local_ip": data.get('local_ip'),
-                "mac_address": data.get('mac_address'),
                 "rssi": data.get('rssi'),
             },
+            "locale": data.get('device_locale'),
             "temperature_scale": data.get('temperature_scale'),
             "sunlight_correction": {
                 "enabled": data.get('sunlight_correction_enabled'),
