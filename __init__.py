@@ -63,15 +63,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             region=entry.data[CONF_REGION],
         )
         
-        # Initialize API with context manager
-        async with api:
-            hass.data[DOMAIN][entry.entry_id] = {
-                "api": api
-            }
-            
-            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-            
-            return True
+        # Initialize API
+        await api._create_session()
+        await api.login()
+        await api._get_devices()
+        await api.update()
+        
+        hass.data[DOMAIN][entry.entry_id] = {
+            "api": api
+        }
+        
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        
+        return True
         
     except Exception as err:
         _LOGGER.error("Error setting up Bad Nest integration: %s", err)

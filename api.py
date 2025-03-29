@@ -373,19 +373,6 @@ class NestAPI:
         else:
             self.device_data[sn]['indoor_chime'] = False
 
-    async def __aenter__(self):
-        """Async enter."""
-        await self._create_session()
-        await self.login()
-        await self._get_devices()
-        await self.update()
-        return self
-
-    async def __aexit__(self, *exc_info):
-        """Async exit."""
-        if self._session:
-            await self._session.close()
-
     async def close(self) -> None:
         """Close the session."""
         if self._session:
