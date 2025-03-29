@@ -131,8 +131,9 @@ class NestClimate(ClimateEntity):
             # Verify device data is available
             if self.device_id not in self.device.device_data:
                 raise KeyError(f"No device data found for thermostat {device_id}")
-                
-            self._attr_name = self.device.device_data[self.device_id].get('name', "Nest Thermostat")
+
+            device_data = self.device.device_data[self.device_id]    
+            self._attr_name = device_data.get('name', "Nest Thermostat")
             
             # Initialize required properties
             self._attr_current_temperature = None
@@ -140,6 +141,9 @@ class NestClimate(ClimateEntity):
             self._attr_target_temperature_high = None
             self._attr_target_temperature_low = None
             self._attr_current_humidity = None
+            
+            # Initialize preset mode based on eco state
+            self._attr_preset_mode = PRESET_ECO if device_data.get('eco', False) else PRESET_NONE
             
         except Exception as e:
             _LOGGER.error(f"Failed to initialize Nest climate device: {str(e)}")
@@ -362,5 +366,9 @@ class NestClimate(ClimateEntity):
         """Updates data."""
         try:
             self.device.update()
+            
+            # Update preset mode based on current eco state
+            device_data = self.device.device_data[self.device_id]
+            self._attr_preset_mode = PRESET_ECO if device_data.get('eco', False) else PRESET_NONE
         except Exception as e:
             _LOGGER.error(f"Failed to update device data: {str(e)}")
