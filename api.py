@@ -271,8 +271,13 @@ class NestAPI():
                         sensor_data["can_heat"]
                     self.device_data[sn]['can_cool'] = \
                         sensor_data["can_cool"]
-                    self.device_data[sn]['mode'] = \
-                        sensor_data["target_temperature_type"]
+                    # Store both the target_temperature_type (for setting) and hvac_mode (for display)
+                    self.device_data[sn]['mode'] = sensor_data["target_temperature_type"]
+                    self.device_data[sn]['hvac_mode'] = sensor_data["target_temperature_type"]
+                    _LOGGER.debug(
+                        f"Thermostat {sn} mode update - "
+                        f"Type: {sensor_data['target_temperature_type']}"
+                    )
                     if self.device_data[sn]['hvac_ac_state']:
                         self.device_data[sn]['action'] = "cooling"
                     elif self.device_data[sn]['hvac_heater_state']:
@@ -428,6 +433,30 @@ class NestAPI():
         """Set operation mode for thermostat."""
         if device_id not in self.thermostats:
             return
+
+        _LOGGER.debug(f"Setting thermostat {device_id} mode to: {mode}")
+        
+        # Get current device data
+        device_data = self.device_data.get(device_id, {})
+        current_mode = device_data.get('hvac_mode', 'off')
+        can_heat = device_data.get('can_heat', False)
+        can_cool = device_data.get('can_cool', False)
+
+        _LOGGER.debug(
+            f"Current state - Mode: {current_mode}, "
+            f"Can Heat: {can_heat}, Can Cool: {can_cool}"
+        )
+
+        # Validate the requested mode against device capabilities
+        if (mode == 'heat' and not can_heat) or \
+           (mode == 'cool' and not can_cool) or \
+           (mode == 'heat-cool' and not (can_heat and can_cool)):
+            _LOGGER.warning(
+                f"Device {device_id} cannot perform mode {mode} - "
+                f"Heat: {can_heat}, Cool: {can_cool}"
+            )
+            # Default to 'off' if requested mode isn't supported
+            mode = 'off'
 
         self._do_request(
             self._session.post,

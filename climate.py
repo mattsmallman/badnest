@@ -33,26 +33,24 @@ HVAC_MODE_MAP = {
     "off": HVACMode.OFF,
 }
 
+# Map Home Assistant modes to their Nest equivalents
+MODE_HASS_TO_NEST = {
+    HVACMode.HEAT_COOL: "range",  # heat-cool
+    HVACMode.COOL: "cool",
+    HVACMode.HEAT: "heat",
+    HVACMode.OFF: "off",
+}
+
+# Map Nest modes to Home Assistant modes
+MODE_NEST_TO_HASS = {v: k for k, v in MODE_HASS_TO_NEST.items()}
+
 # Update fan mode mapping to use new constants
 FAN_MODE_MAP = {
     "on": FAN_ON,
     "auto": FAN_AUTO,
 }
 
-NEST_MODE_HEAT_COOL = "range"
-NEST_MODE_ECO = "eco"
-NEST_MODE_HEAT = "heat"
-NEST_MODE_COOL = "cool"
-NEST_MODE_OFF = "off"
-
-MODE_HASS_TO_NEST = {
-    HVACMode.HEAT_COOL: NEST_MODE_HEAT_COOL,
-    HVACMode.HEAT: NEST_MODE_HEAT,
-    HVACMode.COOL: NEST_MODE_COOL,
-    HVACMode.OFF: NEST_MODE_OFF,
-}
-
-# Update ACTION_NEST_TO_HASS mapping to use HVACAction enum only
+# Map Nest actions to Home Assistant HVAC actions
 ACTION_NEST_TO_HASS = {
     "off": HVACAction.IDLE,
     "heating": HVACAction.HEATING,
@@ -278,6 +276,7 @@ class NestClimate(ClimateEntity):
         """Return current HVAC mode."""
         try:
             device_data = self.device.device_data[self.device_id]
+            # Use the hvac_mode field which is synchronized with Nest's state
             mode = device_data.get('hvac_mode', 'off')
             can_heat = device_data.get('can_heat', False)
             can_cool = device_data.get('can_cool', False)
@@ -365,17 +364,43 @@ class NestClimate(ClimateEntity):
     def set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
         try:
+            device_data = self.device.device_data[self.device_id]
+            current_mode = device_data.get('hvac_mode', 'off')
+            
+            _LOGGER.debug(
+                f"Device {self.device_id} - "
+                f"Current mode: {current_mode}, "
+                f"Setting to: {hvac_mode}, "
+                f"Available modes: {self.hvac_modes}"
+            )
+            
             # Check if the requested mode is supported by the device
             if hvac_mode not in self.hvac_modes:
                 _LOGGER.error(f"HVAC mode {hvac_mode} not supported by device {self.device_id}")
                 return
 
             if hvac_mode in MODE_HASS_TO_NEST:
-                _LOGGER.debug(f"Setting {self.device_id} to mode: {hvac_mode}")
-                self.device.thermostat_set_mode(
-                    self.device_id,
-                    MODE_HASS_TO_NEST[hvac_mode],
-                )
+                nest_mode = MODE_HASS_TO_NEST[hvac_mode]
+                
+                # Only send the mode change if it's different
+                if current_mode != nest_mode:
+                    _LOGGER.debug(
+                        f"Setting {self.device_id} to mode: {hvac_mode} "
+                        f"(Nest mode: {nest_mode})"
+                    )
+                    
+                    # Force an update before setting the mode
+                    self.device.update()
+                    
+                    self.device.thermostat_set_mode(
+                        self.device_id,
+                        nest_mode,
+                    )
+                    
+                    # Force another update to get the new state
+                    self.device.update()
+                else:
+                    _LOGGER.debug(f"Device {self.device_id} already in mode {hvac_mode}")
             else:
                 _LOGGER.error(f"Invalid HVAC mode: {hvac_mode}")
         except Exception as e:
@@ -422,8 +447,18 @@ class NestClimate(ClimateEntity):
         try:
             self.device.update()
             
-            # Update preset mode based on current eco state
             device_data = self.device.device_data[self.device_id]
+            
+            # Log the raw state from Nest for debugging
+            _LOGGER.debug(
+                f"Device {self.device_id} update - "
+                f"Mode: {device_data.get('mode')}, "
+                f"HvacMode: {device_data.get('hvac_mode')}, "
+                f"Action: {device_data.get('action')}, "
+                f"Eco: {device_data.get('eco', False)}"
+            )
+            
+            # Update preset mode based on current eco state
             self._attr_preset_mode = PRESET_ECO if device_data.get('eco', False) else PRESET_NONE
         except Exception as e:
             _LOGGER.error(f"Failed to update device data: {str(e)}")
