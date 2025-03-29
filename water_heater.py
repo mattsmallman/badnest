@@ -193,6 +193,12 @@ class NestWaterHeater(WaterHeaterEntity):
         return self.device.device_data[self.device_id]['hot_water_away_setting']
 
     @property
+    def state(self) -> str:
+        """Return the current state."""
+        is_heating = self.device.device_data[self.device_id].get('hot_water_status', False)
+        return STATE_ON if is_heating else STATE_OFF
+
+    @property
     def state_attributes(self) -> dict[str, Any]:
         """Return the optional state attributes."""
         data = super().state_attributes or {}
