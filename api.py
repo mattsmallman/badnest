@@ -383,6 +383,82 @@ class NestAPI:
         else:
             self.device_data[sn]['indoor_chime'] = False
 
+    async def thermostat_set_temperature(self, device_id: str, target_temp: float, target_temp_high: float = None) -> None:
+        """Set target temperature or range for thermostat."""
+        if target_temp_high is not None:
+            data = {
+                "target_temperature_low": target_temp,
+                "target_temperature_high": target_temp_high,
+                "target_temperature_type": "range"
+            }
+        else:
+            data = {
+                "target_temperature": target_temp,
+                "target_temperature_type": self.device_data[device_id]['mode']
+            }
+
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/temperature",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json=data
+        )
+
+    async def thermostat_set_mode(self, device_id: str, mode: str) -> None:
+        """Set operation mode for thermostat."""
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/temperature_mode",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json={"target_temperature_type": mode}
+        )
+
+    async def thermostat_set_fan(self, device_id: str, end_timestamp: int) -> None:
+        """Set fan timer for thermostat."""
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/fan_timer",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json={"fan_timer_timeout": end_timestamp}
+        )
+
+    async def thermostat_set_eco_mode(self, device_id: str, eco_enable: bool) -> None:
+        """Set eco mode for thermostat."""
+        mode = "manual-eco" if eco_enable else "schedule"
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/eco",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json={"mode": mode}
+        )
+
+    async def hotwater_set_mode(self, device_id: str, mode: str) -> None:
+        """Set hot water operation mode."""
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/hot_water_mode",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json={"mode": mode}
+        )
+
+    async def hotwater_set_away_mode(self, device_id: str, away_mode: bool) -> None:
+        """Set hot water away mode."""
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/hot_water_away",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json={"away_enabled": away_mode}
+        )
+
+    async def hotwater_set_boost(self, device_id: str, time: int) -> None:
+        """Set hot water boost mode with end timestamp."""
+        await self._do_request(
+            'POST',
+            f"{API_URL}/api/0.1/devices/thermostats/{device_id}/hot_water_boost",
+            headers={"Authorization": f"Basic {self._access_token}"},
+            json={"time_to_end": time}
+        )
+
     async def close(self) -> None:
         """Close the session."""
         if self._session:
