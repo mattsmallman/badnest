@@ -180,7 +180,28 @@ class NestAPI:
                 if bucket.startswith('topaz.'):
                     sn = bucket.replace('topaz.', '')
                     self.protects.append(sn)
-                    self.device_data[sn] = {}
+                    # Initialize static device data
+                    bucket_data = response.get('objects', {}).get(bucket, {})
+                    self.device_data[sn] = {
+                        'model': bucket_data.get('model'),
+                        'device_info': {
+                            'color': bucket_data.get('device_external_color'),
+                            'locale': bucket_data.get('device_locale'),
+                            'installed_locale': bucket_data.get('installed_locale')
+                        },
+                        'born_on_date': bucket_data.get('device_born_on_date_utc_secs'),
+                        'replace_by_date': bucket_data.get('replace_by_date_utc_secs'),
+                        'kl_software_version': bucket_data.get('kl_software_version'),
+                        'network': {
+                            'wifi': {
+                                'mac': bucket_data.get('wifi_mac_address'),
+                                'regulatory_domain': bucket_data.get('wifi_regulatory_domain')
+                            },
+                            'thread': {
+                                'mac': bucket_data.get('thread_mac_address')
+                            }
+                        }
+                    }
                 elif bucket.startswith('kryptonite.'):
                     sn = bucket.replace('kryptonite.', '')
                     self.temperature_sensors.append(sn)
@@ -348,14 +369,51 @@ class NestAPI:
         """Process Nest Protect data."""
         _LOGGER.debug(f"Processing protect data for {sn}")
         
+        # Update device name
         self.device_data[sn]['name'] = self._wheres[sensor_data['where_id']]
         if sensor_data.get('description', None):
             self.device_data[sn]['name'] += f' ({sensor_data["description"]})'
         self.device_data[sn]['name'] += ' Protect'
         
-        self.device_data[sn]['co_status'] = self._map_nest_protect_state(sensor_data['co_status'])
-        self.device_data[sn]['smoke_status'] = self._map_nest_protect_state(sensor_data['smoke_status'])
-        self.device_data[sn]['battery_health_state'] = self._map_nest_protect_state(sensor_data['battery_health_state'])
+        # Update dynamic status values
+        self.device_data[sn].update({
+            'co_status': self._map_nest_protect_state(sensor_data['co_status']),
+            'smoke_status': self._map_nest_protect_state(sensor_data['smoke_status']),
+            'battery_health_state': self._map_nest_protect_state(sensor_data['battery_health_state']),
+            'battery_level': sensor_data.get('battery_level'),
+            
+            # Dynamic features state
+            'steam_detection_enable': sensor_data.get('steam_detection_enable'),
+            'night_light': {
+                'enabled': sensor_data.get('night_light_enable'),
+                'brightness': sensor_data.get('night_light_brightness'),
+                'continuous': sensor_data.get('night_light_continuous')
+            },
+            'auto_away': sensor_data.get('auto_away'),
+            
+            # Latest test results
+            'component_tests': {
+                'smoke': sensor_data.get('component_smoke_test_passed'),
+                'co': sensor_data.get('component_co_test_passed'),
+                'humidity': sensor_data.get('component_hum_test_passed'),
+                'temperature': sensor_data.get('component_temp_test_passed'),
+                'pir': sensor_data.get('component_pir_test_passed'),
+                'audio': sensor_data.get('component_speaker_test_passed'),
+                'wifi': sensor_data.get('component_wifi_test_passed')
+            },
+            
+            # Dynamic network info
+            'network': {
+                'wifi': {'ip': sensor_data.get('wifi_ip_address')},
+                'thread': {'ip': sensor_data.get('thread_ip_address')}
+            },
+            
+            # Latest test timestamps
+            'last_test_start': sensor_data.get('latest_manual_test_start_utc_secs'),
+            'last_test_end': sensor_data.get('latest_manual_test_end_utc_secs'),
+            'last_audio_test_start': sensor_data.get('last_audio_self_test_start_utc_secs'),
+            'last_audio_test_end': sensor_data.get('last_audio_self_test_end_utc_secs'),
+        })
 
     async def _process_temperature_sensor(self, sn: str, sensor_data: Dict) -> None:
         """Process temperature sensor data."""

@@ -29,28 +29,48 @@ SENSOR_DESCRIPTIONS = {
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         icon="mdi:thermometer",
         name="Temperature",
+        has_entity_name=True,
+        entity_registry_enabled_default=True,
+        entity_category=None,  # Primary sensor
     ),
     "co_status": SensorEntityDescription(
         key="co_status",
         device_class=SensorDeviceClass.ENUM,
         icon="mdi:molecule-co",
         name="CO Status",
+        has_entity_name=True,
+        entity_registry_enabled_default=True,
+        entity_category=None,  # Safety-critical sensor
+        options=["Ok", "Warning", "Emergency", "Unknown"],
     ),
     "smoke_status": SensorEntityDescription(
         key="smoke_status",
         device_class=SensorDeviceClass.ENUM,
         icon="mdi:smoke-detector", 
         name="Smoke Status",
+        has_entity_name=True,
+        entity_registry_enabled_default=True,
+        entity_category=None,  # Safety-critical sensor
+        options=["Ok", "Warning", "Emergency", "Unknown"],
     ),
     "battery_health_state": SensorEntityDescription(
         key="battery_health_state",
         device_class=SensorDeviceClass.ENUM,
         icon="mdi:battery",
         name="Battery Health",
+        has_entity_name=True,
+        entity_registry_enabled_default=True,
+        entity_category=None,  # Safety-critical sensor
+        options=["Ok", "Warning", "Emergency", "Unknown"],
     ),
 }
 
 PROTECT_SENSOR_TYPES = ["co_status", "smoke_status", "battery_health_state"]
+
+# Common URLs for all Nest devices
+NEST_HOME_URL = "https://home.nest.com"
+NEST_STORE_URL_PROTECT = "https://store.google.com/product/nest_protect"
+NEST_STORE_URL_TEMP = "https://store.google.com/product/nest_temperature_sensor"
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -90,7 +110,49 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
-class NestTemperatureSensor(SensorEntity):
+class NestBaseSensor(SensorEntity):
+    """Base implementation for all Nest sensors."""
+
+    def __init__(
+        self,
+        device_id: str,
+        api,
+        description: SensorEntityDescription,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the sensor."""
+        self.entity_description = description
+        self.device_id = device_id
+        self.device = api
+        self._entry = entry
+        
+        # Set unique ID
+        self._attr_unique_id = f"{entry.entry_id}_{device_id}_{description.key}"
+
+    def _get_base_device_info(self, data: dict) -> DeviceInfo:
+        """Get common device info attributes."""
+        connections = set()
+        if wifi_mac := data.get("network", {}).get("wifi", {}).get("mac"):
+            connections.add(("mac", wifi_mac))
+        if thread_mac := data.get("network", {}).get("thread", {}).get("mac"):
+            connections.add(("mac", thread_mac))
+
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.entry_id}_{self.device_id}")},
+            name=data['name'],
+            manufacturer="Nest",
+            suggested_area=data.get('where_name'),
+            configuration_url=NEST_HOME_URL,
+            via_device=(DOMAIN, self._entry.entry_id),
+            connections=connections,
+            serial_number=self.device_id,
+        )
+
+    async def async_update(self) -> None:
+        """Update the data from API."""
+        await self.device.update()
+
+class NestTemperatureSensor(NestBaseSensor):
     """Implementation of the Nest Temperature Sensor."""
 
     def __init__(self, device_id: str, api, description: SensorEntityDescription, entry: ConfigEntry):
@@ -109,14 +171,29 @@ class NestTemperatureSensor(SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device specific attributes."""
+        data = self.device.device_data[self.device_id]
+        
+        # Collect MAC addresses for connections
+        connections = set()
+        if wifi_mac := data.get("network", {}).get("wifi", {}).get("mac"):
+            connections.add(("mac", wifi_mac))
+        if thread_mac := data.get("network", {}).get("thread", {}).get("mac"):
+            connections.add(("mac", thread_mac))
+
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry.entry_id}_{self.device_id}")},
-            name=self.device.device_data[self.device_id]['name'],
+            name=data['name'],
             manufacturer="Nest",
-            model="Temperature Sensor",
-            sw_version=self.device.device_data[self.device_id].get('software_version'),
-            suggested_area=self.device.device_data[self.device_id].get('where_name'),
+            model=data.get('model', "Temperature Sensor"),
+            sw_version=data.get('software_version'),
+            hw_version=data.get('model_version'),
+            suggested_area=data.get('where_name'),
+            configuration_url=NEST_HOME_URL,
             via_device=(DOMAIN, self._entry.entry_id),
+            connections=connections,
+            manufacturer_url=NEST_STORE_URL_TEMP,
+            serial_number=self.device_id,
+            suggested_type="sensor",
         )
 
     @property 
@@ -127,9 +204,23 @@ class NestTemperatureSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
+        data = self.device.device_data[self.device_id]
         return {
-            ATTR_BATTERY_LEVEL:
-                self.device.device_data[self.device_id]['battery_level']
+            ATTR_BATTERY_LEVEL: data.get('battery_level'),
+            "auto_away": data.get('auto_away'),
+            "component_tests": {
+                "temperature": data.get('component_temp_test_passed'),
+                "wifi": data.get('component_wifi_test_passed')
+            },
+            "network": {
+                "wifi": {
+                    "ip": data.get('wifi_ip_address'),
+                    "regulatory_domain": data.get('wifi_regulatory_domain')
+                },
+                "thread": {
+                    "ip": data.get('thread_ip_address')
+                }
+            }
         }
 
     async def async_update(self):
@@ -156,14 +247,40 @@ class NestProtectSensor(SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device specific attributes."""
+        data = self.device.device_data[self.device_id]
+        model = data.get('model', "Protect")
+        if data.get('device_external_color'):
+            model = f"{model} ({data['device_external_color']})"
+        
+        # Collect MAC addresses for connections
+        connections = set()
+        if wifi_mac := data.get("network", {}).get("wifi", {}).get("mac"):
+            connections.add(("mac", wifi_mac))
+        if thread_mac := data.get("network", {}).get("thread", {}).get("mac"):
+            connections.add(("mac", thread_mac))
+            
+        # Combine software versions if both exist
+        sw_version = data.get('kl_software_version')
+        if base_version := data.get('software_version'):
+            sw_version = f"{sw_version} (Base: {base_version})" if sw_version else base_version
+
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry.entry_id}_{self.device_id}")},
-            name=self.device.device_data[self.device_id]['name'],
+            name=data['name'],
             manufacturer="Nest",
-            model="Protect",
-            sw_version=self.device.device_data[self.device_id].get('software_version'),
-            suggested_area=self.device.device_data[self.device_id].get('where_name'),
+            model=model,
+            sw_version=sw_version,
+            hw_version=data.get('model_version'),
+            suggested_area=data.get('where_name'),
+            configuration_url=NEST_HOME_URL,
             via_device=(DOMAIN, self._entry.entry_id),
+            connections=connections,
+            manufacturer_url=NEST_STORE_URL_PROTECT,
+            serial_number=self.device_id,
+            suggested_type="smoke",
+            production_date=data.get('device_born_on_date_utc_secs'),
+            removal_date=data.get('replace_by_date_utc_secs'),
+            translation_key=data.get('device_locale')
         )
 
     @property
@@ -177,8 +294,6 @@ class NestProtectSensor(SensorEntity):
         data = self.device.device_data[self.device_id]
         return {
             ATTR_BATTERY_LEVEL: data.get('battery_level'),
-            "device_model": data.get('model'),
-            "creation_time": data.get('creation_time'),
             "last_test_start": data.get('latest_manual_test_start_utc_secs'),
             "last_test_end": data.get('latest_manual_test_end_utc_secs'),
             "last_audio_test_start": data.get('last_audio_self_test_start_utc_secs'),
@@ -190,18 +305,9 @@ class NestProtectSensor(SensorEntity):
                 "continuous": data.get('night_light_continuous')
             },
             "steam_detection_enable": data.get('steam_detection_enable'),
-            "born_on_date": data.get('device_born_on_date_utc_secs'),
-            "replace_by_date": data.get('replace_by_date_utc_secs'),
-            "kl_software_version": data.get('kl_software_version'),
-            "device_info": {
-                "color": data.get('device_external_color'),
-                "locale": data.get('device_locale'),
-                "installed_locale": data.get('installed_locale')
-            },
             "component_tests": {
                 "smoke": data.get('component_smoke_test_passed'),
                 "co": data.get('component_co_test_passed'),
-                "heat": data.get('component_heat_test_passed'),
                 "humidity": data.get('component_hum_test_passed'),
                 "temperature": data.get('component_temp_test_passed'),
                 "pir": data.get('component_pir_test_passed'),
@@ -211,12 +317,10 @@ class NestProtectSensor(SensorEntity):
             "network": {
                 "wifi": {
                     "ip": data.get('wifi_ip_address'),
-                    "mac": data.get('wifi_mac_address'),
                     "regulatory_domain": data.get('wifi_regulatory_domain')
                 },
                 "thread": {
-                    "ip": data.get('thread_ip_address'),
-                    "mac": data.get('thread_mac_address')
+                    "ip": data.get('thread_ip_address')
                 }
             }
         }

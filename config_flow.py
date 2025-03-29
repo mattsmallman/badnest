@@ -41,8 +41,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     )
 
     try:
-        # Force an API call to verify credentials
-        await hass.async_add_executor_job(api.update)
+        # Initialize the API connection
+        await api._create_session()
+        await api.login()
+        await api._get_devices()
+        await api.update()
     except Exception as err:
         _LOGGER.exception("Validation error")
         raise CannotConnect from err

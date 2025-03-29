@@ -1,9 +1,7 @@
 """Diagnostics support for Bad Nest."""
-from __future__ import annotations
-
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components import diagnostics
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ACCESS_TOKEN, CONF_USER_ID
 from homeassistant.core import HomeAssistant
@@ -42,7 +40,7 @@ async def async_get_config_entry_diagnostics(
     diagnostics_data = {
         "entry": {
             "title": entry.title,
-            "data": async_redact_data(entry.data, TO_REDACT),
+            "data": diagnostics.async_redact_data(entry.data, TO_REDACT),
         },
         "device_data": device_data,
         "device_counts": {
