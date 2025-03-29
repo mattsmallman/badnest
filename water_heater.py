@@ -9,8 +9,6 @@ from homeassistant.const import (
     ATTR_ENTITY_ID,
 )
 from homeassistant.components.water_heater import (
-    STATE_OFF,
-    STATE_ON,
     ATTR_AWAY_MODE,
     ATTR_OPERATION_MODE,
     ATTR_OPERATION_LIST,
@@ -41,7 +39,11 @@ from .const import (
     DOMAIN,
 )
 
-STATE_SCHEDULE = 'schedule'
+STATE_SCHEDULE = 'Schedule'
+STATE_OFF = 'Off'
+STATE_HEATING = 'Heating'
+STATE_IDLE = 'Idle'
+
 SERVICE_BOOST_HOT_WATER = 'boost_hot_water'
 ATTR_TIME_PERIOD = 'time_period'
 ATTR_BOOST_MODE_STATUS = 'boost_mode_status'
@@ -49,11 +51,10 @@ ATTR_BOOST_MODE = 'boost_mode'
 ATTR_HEATING_ACTIVE = 'heating_active'
 ATTR_AWAY_MODE_ACTIVE = 'away_mode_active'
 
-
 NEST_TO_HASS_MODE = {"schedule": STATE_SCHEDULE, "off": STATE_OFF}
 HASS_TO_NEST_MODE = {STATE_SCHEDULE: "schedule", STATE_OFF: "off"}
-NEST_TO_HASS_STATE = {True: STATE_ON, False: STATE_OFF}
-HASS_TO_NEST_STATE = {STATE_ON: True, STATE_OFF: False}
+NEST_TO_HASS_STATE = {True: STATE_HEATING, False: STATE_IDLE}
+HASS_TO_NEST_STATE = {STATE_HEATING: True, STATE_IDLE: False}
 SUPPORTED_OPERATIONS = [STATE_SCHEDULE, STATE_OFF]
 
 BOOST_HOT_WATER_SCHEMA = vol.Schema(
@@ -65,7 +66,6 @@ BOOST_HOT_WATER_SCHEMA = vol.Schema(
 )
 
 _LOGGER = logging.getLogger(__name__)
-
 
 async def async_setup_platform(hass,
                                config,
@@ -105,7 +105,6 @@ async def async_setup_platform(hass,
         hot_water_boost,
         schema=BOOST_HOT_WATER_SCHEMA,
     )
-
 
 class NestWaterHeater(WaterHeaterEntity):
 
@@ -148,7 +147,7 @@ class NestWaterHeater(WaterHeaterEntity):
         """Return the (master) state of the water heater."""
         if self.device.device_data[self.device_id]['hot_water_status']:
             return NEST_TO_HASS_STATE[self.device.device_data[self.device_id]['hot_water_status']]
-        return STATE_OFF
+        return STATE_IDLE
 
     @property
     def capability_attributes(self):
@@ -175,7 +174,7 @@ class NestWaterHeater(WaterHeaterEntity):
         # Away mode attributes
         if self.supported_features & SUPPORT_AWAY_MODE:
             is_away = self.is_away_mode_on
-            data[ATTR_AWAY_MODE] = STATE_ON if is_away else STATE_OFF
+            data[ATTR_AWAY_MODE] = STATE_HEATING if is_away else STATE_IDLE
             data[ATTR_AWAY_MODE_ACTIVE] = device_data.get('hot_water_away_active', False)
 
         # Boost mode attributes
@@ -211,8 +210,9 @@ class NestWaterHeater(WaterHeaterEntity):
 
     def set_operation_mode(self, operation_mode):
         """Set new target operation mode."""
-        if self.device.device_data[self.device_id]['has_hot_water_control']:
-            self.device.hotwater_set_mode(self.device_id, mode=operation_mode)
+        nest_mode = HASS_TO_NEST_MODE.get(operation_mode)
+        if nest_mode and self.device.device_data[self.device_id]['has_hot_water_control']:
+            self.device.hotwater_set_mode(self.device_id, mode=nest_mode)
 
     async def async_set_operation_mode(self, operation_mode):
         """Set new target operation mode."""
@@ -249,7 +249,6 @@ class NestWaterHeater(WaterHeaterEntity):
     def update(self):
         """Get the latest data from the Hot Water Sensor and updates the states."""
         self.device.update()
-
 
 async def async_service_away_mode(entity, service):
     """Handle away mode service."""
