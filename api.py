@@ -31,17 +31,48 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class NestAPI():
+    def _do_request(self, method_func, url, **kwargs):
+        """Execute HTTP request with retries and error handling."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = method_func(url, **kwargs)
+                response.raise_for_status()
+                try:
+                    return response.json()
+                except ValueError:
+                    return response
+            except requests.exceptions.RequestException as e:
+                if attempt == max_retries - 1:
+                    raise
+                _LOGGER.debug(f"Request failed, attempt {attempt + 1}/{max_retries}: {str(e)}")
+                sleep(2 ** attempt)  # Exponential backoff
+                if isinstance(e, requests.exceptions.HTTPError) and e.response.status_code == 401:
+                    _LOGGER.debug("Authentication failed, attempting to login again")
+                    self.login()
+                    kwargs.get('headers', {}).update({"Authorization": f"Basic {self._access_token}"})
+
     def __init__(self, user_id, access_token, issue_token, cookie, region):
         """Badnest Google Nest API interface."""
         self.device_data = {}
         self._wheres = {}
         self._user_id = user_id
         self._access_token = access_token
+        
+        # Configure session with proper connection pooling
         self._session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=20,    # Increase from default 10
+            pool_maxsize=20,       # Increase from default 10
+            max_retries=3,         # Add retry configuration
+            pool_block=False       # Don't block when pool is depleted
+        )
+        self._session.mount('https://', adapter)
         self._session.headers.update({
             "Referer": "https://home.nest.com/",
             "User-Agent": USER_AGENT,
         })
+        
         self._issue_token = issue_token
         self._cookie = cookie
         self._czfe_url = None
@@ -85,8 +116,8 @@ class NestAPI():
             'Referer': 'https://accounts.google.com/o/oauth2/iframe',
             'cookie': cookie
         }
-        r = self._session.get(url=issue_token, headers=headers)
-        access_token = r.json()['access_token']
+        response = self._do_request(self._session.get, issue_token, headers=headers)
+        access_token = response['access_token']
 
         headers = {
             'User-Agent': USER_AGENT,
@@ -100,65 +131,57 @@ class NestAPI():
             "google_oauth_access_token": access_token,
             "policy_id": 'authproxy-oauth-policy'
         }
-        r = self._session.post(url=URL_JWT, headers=headers, params=params)
-        self._user_id = r.json()['claims']['subject']['nestId']['id']
-        self._access_token = r.json()['jwt']
+        response = self._do_request(self._session.post, URL_JWT, headers=headers, params=params)
+        self._user_id = response['claims']['subject']['nestId']['id']
+        self._access_token = response['jwt']
         self._session.headers.update({
             "Authorization": f"Basic {self._access_token}",
         })
 
     def _login_dropcam(self):
-        self._session.post(
+        self._do_request(
+            self._session.post,
             f"{API_URL}/dropcam/api/login",
             data={"access_token": self._access_token}
         )
 
     def _get_cameras_updates_pt2(self, sn):
+        headers = {
+            'User-Agent': USER_AGENT,
+            'X-Requested-With': 'XmlHttpRequest',
+            'Referer': 'https://home.nest.com/',
+            'cookie': f"user_token={self._access_token}"
+        }
+        
+        response = self._do_request(
+            self._session.get,
+            f"{CAMERA_WEBAPI_BASE}/api/cameras.get_with_properties?uuid={sn}",
+            headers=headers
+        )
+        
         try:
-            headers = {
-                'User-Agent': USER_AGENT,
-                'X-Requested-With': 'XmlHttpRequest',
-                'Referer': 'https://home.nest.com/',
-                'cookie': f"user_token={self._access_token}"
-            }
-            r = self._session.get(
-                f"{CAMERA_WEBAPI_BASE}/api/cameras.get_with_properties?uuid="+sn, headers=headers)
-
-            if str(r.json()["status"]).startswith(str(5)):
-                _LOGGER.debug('The Google proxy server sometimes gets a bit unhappy trying again')
-                sleep(4)
-                r = self._session.get(
-                    f"{CAMERA_WEBAPI_BASE}/api/cameras.get_with_properties?uuid="+sn, headers=headers)
-
-            sensor_data = r.json()["items"][0]
-
+            sensor_data = response["items"][0]
             self.device_data[sn]['chime_state'] = \
                 sensor_data["properties"]["doorbell.indoor_chime.enabled"]
-
-        except (requests.exceptions.RequestException, IndexError) as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to get camera update pt2, trying again')
-            self._get_cameras_updates_pt2(sn)
-        except KeyError:
-            _LOGGER.debug('Failed to get camera update pt2, trying to log in again')
-            self.login()
-            self._get_cameras_updates_pt2(sn)
+        except (IndexError, KeyError) as e:
+            _LOGGER.error(f"Error parsing camera data: {str(e)}")
 
 
     def _get_devices(self):
+        response = self._do_request(
+            self._session.post,
+            f"{API_URL}/api/0.1/user/{self._user_id}/app_launch",
+            json={
+                "known_bucket_types": ["buckets"],
+                "known_bucket_versions": [],
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
+
         try:
-            r = self._session.post(
-                f"{API_URL}/api/0.1/user/{self._user_id}/app_launch",
-                json={
-                    "known_bucket_types": ["buckets"],
-                    "known_bucket_versions": [],
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
+            self._czfe_url = response["service_urls"]["urls"]["czfe_url"]
 
-            self._czfe_url = r.json()["service_urls"]["urls"]["czfe_url"]
-
-            buckets = r.json()['updated_buckets'][0]['value']['buckets']
+            buckets = response['updated_buckets'][0]['value']['buckets']
             for bucket in buckets:
                 if bucket.startswith('topaz.'):
                     sn = bucket.replace('topaz.', '')
@@ -179,15 +202,9 @@ class NestAPI():
                     self.cameras.append(sn)
                     self.switches.append(sn)
                     self.device_data[sn] = {}
-
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to get devices, trying again')
-            return self.get_devices()
-        except KeyError:
-            _LOGGER.debug('Failed to get devices, trying to log in again')
-            self.login()
-            return self.get_devices()
+        except (KeyError, IndexError) as e:
+            _LOGGER.error(f"Error parsing device data: {str(e)}")
+            raise
 
     @classmethod
     def _map_nest_protect_state(cls, value):
@@ -202,8 +219,9 @@ class NestAPI():
 
     def update(self):
         try:
-            # To get friendly names
-            r = self._session.post(
+            # Get friendly names
+            response = self._do_request(
+                self._session.post,
                 f"{API_URL}/api/0.1/user/{self._user_id}/app_launch",
                 json={
                     "known_bucket_types": ["where"],
@@ -212,16 +230,17 @@ class NestAPI():
                 headers={"Authorization": f"Basic {self._access_token}"},
             )
 
-            for bucket in r.json()["updated_buckets"]:
+            for bucket in response["updated_buckets"]:
                 sensor_data = bucket["value"]
                 sn = bucket["object_key"].split('.')[1]
-                if bucket["object_key"].startswith(
-                        f"where.{sn}"):
+                if bucket["object_key"].startswith(f"where.{sn}"):
                     wheres = sensor_data['wheres']
                     for where in wheres:
                         self._wheres[where['where_id']] = where['name']
 
-            r = self._session.post(
+            # Get device data
+            response = self._do_request(
+                self._session.post,
                 f"{API_URL}/api/0.1/user/{self._user_id}/app_launch",
                 json={
                     "known_bucket_types": KNOWN_BUCKET_TYPES,
@@ -230,7 +249,7 @@ class NestAPI():
                 headers={"Authorization": f"Basic {self._access_token}"},
             )
 
-            for bucket in r.json()["updated_buckets"]:
+            for bucket in response["updated_buckets"]:
                 sensor_data = bucket["value"]
                 sn = bucket["object_key"].split('.')[1]
                 # Thermostats (thermostat and sensors system)
@@ -356,292 +375,196 @@ class NestAPI():
                     else:
                         self.device_data[sn]['indoor_chime'] = False
 
-        except simplejson.errors.JSONDecodeError as e:
-            _LOGGER.error(e)
-            if r.status_code != 200 and r.status_code != 502:
-                _LOGGER.error('Information for further debugging: ' +
-                             'return code {} '.format(r.status_code) +
-                             'and returned text {}'.format(r.text))
-
-            if r.status_code == 502:
-                _LOGGER.error('Error 502, Failed to update, retrying in 30s')
-                sleep(30)
-                self.update()
-
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to update, trying again')
-            self.update()
-
-        except KeyError:
-            _LOGGER.debug('Failed to update, trying to log in again')
-            self.login()
-            self.update()
+        except (simplejson.errors.JSONDecodeError, KeyError, IndexError) as e:
+            # Catch any data parsing errors but don't retry since _do_request already handles retries
+            _LOGGER.error(f"Error parsing update data: {str(e)}")
 
     def thermostat_set_temperature(self, device_id, temp, temp_high=None):
+        """Set target temperature for thermostat."""
         if device_id not in self.thermostats:
             return
 
-        try:
-            if temp_high is None:
-                self._session.post(
-                    f"{self._czfe_url}/v5/put",
-                    json={
-                        "objects": [
-                            {
-                                "object_key": f'shared.{device_id}',
-                                "op": "MERGE",
-                                "value": {"target_temperature": temp},
-                            }
-                        ]
-                    },
-                    headers={"Authorization": f"Basic {self._access_token}"},
-                )
-            else:
-                self._session.post(
-                    f"{self._czfe_url}/v5/put",
-                    json={
-                        "objects": [
-                            {
-                                "object_key": f'shared.{device_id}',
-                                "op": "MERGE",
-                                "value": {
-                                    "target_temperature_low": temp,
-                                    "target_temperature_high": temp_high,
-                                },
-                            }
-                        ]
-                    },
-                    headers={"Authorization": f"Basic {self._access_token}"},
-                )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set temperature, trying again')
-            self.thermostat_set_temperature(device_id, temp, temp_high)
-        except KeyError:
-            _LOGGER.debug('Failed to set temperature, trying to log in again')
-            self.login()
-            self.thermostat_set_temperature(device_id, temp, temp_high)
+        value = {"target_temperature": temp} if temp_high is None else {
+            "target_temperature_low": temp,
+            "target_temperature_high": temp_high,
+        }
+        
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'shared.{device_id}',
+                        "op": "MERGE",
+                        "value": value,
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def thermostat_set_target_humidity(self, device_id, humidity):
+        """Set target humidity for thermostat."""
         if device_id not in self.thermostats:
             return
 
-        try:
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'device.{device_id}',
-                            "op": "MERGE",
-                            "value": {"target_humidity": humidity},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set humidity, trying again')
-            self.thermostat_set_target_humidity(device_id, humidity)
-        except KeyError:
-            _LOGGER.debug('Failed to set humidity, trying to log in again')
-            self.login()
-            self.thermostat_set_target_humidity(device_id, humidity)
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'device.{device_id}',
+                        "op": "MERGE",
+                        "value": {"target_humidity": humidity},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def thermostat_set_mode(self, device_id, mode):
+        """Set operation mode for thermostat."""
         if device_id not in self.thermostats:
             return
 
-        try:
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'shared.{device_id}',
-                            "op": "MERGE",
-                            "value": {"target_temperature_type": mode},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set mode, trying again')
-            self.thermostat_set_mode(device_id, mode)
-        except KeyError:
-            _LOGGER.debug('Failed to set mode, trying to log in again')
-            self.login()
-            self.thermostat_set_mode(device_id, mode)
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'shared.{device_id}',
+                        "op": "MERGE",
+                        "value": {"target_temperature_type": mode},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def thermostat_set_fan(self, device_id, date):
+        """Set fan timer for thermostat."""
         if device_id not in self.thermostats:
             return
 
-        try:
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'device.{device_id}',
-                            "op": "MERGE",
-                            "value": {"fan_timer_timeout": date},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set fan, trying again')
-            self.thermostat_set_fan(device_id, date)
-        except KeyError:
-            _LOGGER.debug('Failed to set fan, trying to log in again')
-            self.login()
-            self.thermostat_set_fan(device_id, date)
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'device.{device_id}',
+                        "op": "MERGE",
+                        "value": {"fan_timer_timeout": date},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def thermostat_set_eco_mode(self, device_id, state):
+        """Set eco mode for thermostat."""
         if device_id not in self.thermostats:
             return
 
-        try:
-            mode = 'manual-eco' if state else 'schedule'
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'device.{device_id}',
-                            "op": "MERGE",
-                            "value": {"eco": {"mode": mode}},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set eco, trying again')
-            self.thermostat_set_eco_mode(device_id, state)
-        except KeyError:
-            _LOGGER.debug('Failed to set eco, trying to log in again')
-            self.login()
-            self.thermostat_set_eco_mode(device_id, state)
+        mode = 'manual-eco' if state else 'schedule'
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'device.{device_id}',
+                        "op": "MERGE",
+                        "value": {"eco": {"mode": mode}},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def hotwater_set_boost(self, device_id, time):
+        """Set hot water boost timer."""
         if device_id not in self.hotwatercontrollers:
             return
 
-        try:
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'device.{device_id}',
-                            "op": "MERGE",
-                            "value": {"hot_water_boost_time_to_end": time},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to boost hot water, trying again')
-            self.hotwater_set_boost(device_id, time)
-        except KeyError:
-            _LOGGER.debug('Failed to boost hot water, trying to log in again')
-            self.login()
-            self.hotwater_set_boost(device_id, time)
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'device.{device_id}',
+                        "op": "MERGE",
+                        "value": {"hot_water_boost_time_to_end": time},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def hotwater_set_away_mode(self, device_id, away_mode):
+        """Set hot water away mode."""
         if device_id not in self.hotwatercontrollers:
             return
 
-        try:
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'device.{device_id}',
-                            "op": "MERGE",
-                            "value": {"hot_water_away_enabled": away_mode},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set hot water away mode, trying again')
-            self.hotwater_set_away_mode(device_id, away_mode)
-        except KeyError:
-            _LOGGER.debug('Failed to set hot water away mode, '
-                          'trying to log in again')
-            self.login()
-            self.hotwater_set_away_mode(device_id, away_mode)
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'device.{device_id}',
+                        "op": "MERGE",
+                        "value": {"hot_water_away_enabled": away_mode},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
     def hotwater_set_mode(self, device_id, mode):
+        """Set hot water operating mode."""
         if device_id not in self.hotwatercontrollers:
             return
 
-        try:
-            self._session.post(
-                f"{self._czfe_url}/v5/put",
-                json={
-                    "objects": [
-                        {
-                            "object_key": f'device.{device_id}',
-                            "op": "MERGE",
-                            "value": {"hot_water_mode": mode},
-                        }
-                    ]
-                },
-                headers={"Authorization": f"Basic {self._access_token}"},
-            )
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set hot water mode, trying again')
-            self.hotwater_set_boost(device_id, mode)
-        except KeyError:
-            _LOGGER.debug('Failed to set hot water mode, '
-                          'trying to log in again')
-            self.login()
-            self.hotwater_set_boost(device_id, mode)
+        self._do_request(
+            self._session.post,
+            f"{self._czfe_url}/v5/put",
+            json={
+                "objects": [
+                    {
+                        "object_key": f'device.{device_id}',
+                        "op": "MERGE",
+                        "value": {"hot_water_mode": mode},
+                    }
+                ]
+            },
+            headers={"Authorization": f"Basic {self._access_token}"},
+        )
 
 
     def _camera_set_properties(self, device_id, property, value):
+        """Set camera properties with automatic retries and error handling."""
         if device_id not in self.cameras:
             return
 
-        try:
-            headers = {
-                'User-Agent': USER_AGENT,
-                'X-Requested-With': 'XmlHttpRequest',
-                'Referer': 'https://home.nest.com/',
-                'cookie': f"user_token={self._access_token}"
-            }
-            r = self._session.post(
-                f"{CAMERA_WEBAPI_BASE}/api/dropcams.set_properties",
-                data={property: value, "uuid": device_id}, headers=headers
-            )
-
-            return r.json()["items"]
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to set camera property, trying again')
-            return self._camera_set_properties(device_id, property, value)
-        except KeyError:
-            _LOGGER.debug('Failed to set camera property, ' +
-                          'trying to log in again')
-            self.login()
-            return self._camera_set_properties(device_id, property, value)
+        headers = {
+            'User-Agent': USER_AGENT,
+            'X-Requested-With': 'XmlHttpRequest',
+            'Referer': 'https://home.nest.com/',
+            'cookie': f"user_token={self._access_token}"
+        }
+        response = self._do_request(
+            self._session.post,
+            f"{CAMERA_WEBAPI_BASE}/api/dropcams.set_properties",
+            data={property: value, "uuid": device_id},
+            headers=headers
+        )
+        
+        return response.get("items", [])
 
     def camera_turn_off(self, device_id):
         if device_id not in self.cameras:
@@ -656,32 +579,23 @@ class NestAPI():
         return self._camera_set_properties(device_id, "streaming.enabled", "true")
 
     def camera_get_image(self, device_id, now):
+        """Get camera image with automatic retries and error handling."""
         if device_id not in self.cameras:
             return
 
-        try:
-            headers = {
-                'User-Agent': USER_AGENT,
-                'X-Requested-With': 'XmlHttpRequest',
-                'Referer': 'https://home.nest.com/',
-                'cookie': f"user_token={self._access_token}"
-            }
-            r = self._session.get(
-                f'{self._camera_url}/get_image?uuid={device_id}' +
-                f'&cachebuster={now}',
-                headers=headers
-                # headers={"cookie": f'user_token={self._access_token}'},
-            )
-
-            return r.content
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(e)
-            _LOGGER.error('Failed to get camera image, trying again')
-            return self.camera_get_image(device_id, now)
-        except KeyError:
-            _LOGGER.debug('Failed to get camera image, trying to log in again')
-            self.login()
-            return self.camera_get_image(device_id, now)
+        headers = {
+            'User-Agent': USER_AGENT,
+            'X-Requested-With': 'XmlHttpRequest',
+            'Referer': 'https://home.nest.com/',
+            'cookie': f"user_token={self._access_token}"
+        }
+        response = self._do_request(
+            self._session.get,
+            f'{self._camera_url}/get_image?uuid={device_id}&cachebuster={now}',
+            headers=headers
+        )
+        
+        return response.content if hasattr(response, 'content') else None
 
     def camera_turn_chime_off(self, device_id):
         if device_id not in self.switches:
@@ -694,4 +608,3 @@ class NestAPI():
             return
 
         return self._camera_set_properties(device_id, "doorbell.indoor_chime.enabled", "true")
-
