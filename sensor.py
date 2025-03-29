@@ -19,7 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 PROTECT_SENSOR_TYPES = [
     "co_status",
     "smoke_status",
-    "battery_health"  # Changed from battery_health_state to match SENSOR_TYPES
+    "battery_health_state"  # Matches API data structure
 ]
 
 SENSOR_TYPES = {
@@ -40,7 +40,7 @@ SENSOR_TYPES = {
         "icon": "mdi:smoke-detector",
         "name": "Smoke Status",
     },
-    "battery_health": {  # Matches PROTECT_SENSOR_TYPES
+    "battery_health_state": {  # Matches API data structure
         "device_class": SensorDeviceClass.BATTERY,
         "state_class": SensorStateClass.MEASUREMENT,
         "icon": "mdi:battery",
