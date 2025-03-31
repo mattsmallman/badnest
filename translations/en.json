@@ -1,4 +1,24 @@
 {
+    "services": {
+        "cancel_boost_hot_water": {
+            "name": "Cancel Hot Water Boost",
+            "description": "Cancel the current hot water boost."
+        },
+        "boost_hot_water": {
+            "name": "Boost Hot Water",
+            "description": "Boost hot water for a specified time period.",
+            "fields": {
+                "time_period": {
+                    "name": "Time Period",
+                    "description": "Duration in minutes to boost hot water for."
+                },
+                "boost_mode": {
+                    "name": "Boost Mode",
+                    "description": "Whether to enable (true) or disable (false) boost mode."
+                }
+            }
+        }
+    },
     "config": {
         "step": {
             "user": {

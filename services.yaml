@@ -10,6 +10,9 @@ boost_hot_water:
     entity:
       domain: water_heater
       integration: badnest
+    device:
+      integration: badnest
+      domain: climate
 
   # Fields
   fields:
@@ -32,3 +35,19 @@ boost_hot_water:
       required: true
       selector:
         boolean:
+
+# Service ID
+cancel_boost_hot_water:
+  # Service name
+  name: Cancel Hot Water Boost
+  # Service description
+  description: Cancel the current hot water boost.
+  
+  # Target selection
+  target:
+    entity:
+      domain: water_heater
+      integration: badnest
+    device:
+      integration: badnest
+      domain: climate

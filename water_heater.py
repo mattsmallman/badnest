@@ -5,9 +5,11 @@ from typing import Any
 
 from homeassistant.util.dt import now
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import ATTR_ENTITY_ID, ATTR_DEVICE_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
     WaterHeaterEntityFeature,
@@ -35,6 +37,7 @@ SUPPORTED_FEATURES = (
 # States and modes
 STATE_SCHEDULE = 'Schedule'
 SERVICE_BOOST_HOT_WATER = 'boost_hot_water'
+SERVICE_CANCEL_BOOST_HOT_WATER = 'cancel_boost_hot_water'
 ATTR_TIME_PERIOD = 'time_period'
 ATTR_BOOST_MODE = 'boost_mode'
 ATTR_BOOST_MODE_STATUS = 'boost_mode_status'
@@ -83,18 +86,57 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
+    def get_water_heaters_for_device(device_id: str) -> list[NestWaterHeater]:
+        """Get water heater entities for a device ID."""
+        device_registry = dr.async_get(hass)
+        entity_registry = er.async_get(hass)
+        
+        # Get the device from the registry
+        device = device_registry.async_get(device_id)
+        if not device:
+            _LOGGER.warning(f"Device {device_id} not found in registry")
+            return []
+            
+        # Find all entities for this device
+        entity_entries = er.async_entries_for_device(
+            entity_registry, device_id, include_disabled_entities=False
+        )
+        
+        # Filter to water heater entities
+        water_heater_entity_ids = [
+            entry.entity_id for entry in entity_entries
+            if entry.domain == "water_heater"
+        ]
+        
+        # Find the matching water heater entities
+        return [
+            heater for heater in entities
+            if heater.entity_id in water_heater_entity_ids
+        ]
+
     async def async_hot_water_boost(service: ServiceCall) -> None:
         """Handle the service call."""
-        entity_ids = service.data[ATTR_ENTITY_ID]
+        entity_ids = service.data.get(ATTR_ENTITY_ID, [])
+        device_ids = service.data.get(ATTR_DEVICE_ID, [])
         minutes = service.data[ATTR_TIME_PERIOD]
         timeToEnd = int(datetime.timestamp(now()) + minutes * 60)
         mode = service.data[ATTR_BOOST_MODE]
         _LOGGER.debug('HW boost mode: %s ending: %s', mode, timeToEnd)
 
+        # Get target heaters from entity IDs
         target_heaters = [
             heater for heater in entities
             if not entity_ids or heater.entity_id in entity_ids
         ]
+        
+        # Add target heaters from device IDs
+        for device_id in device_ids:
+            target_heaters.extend(get_water_heaters_for_device(device_id))
+            
+        # Remove duplicates
+        target_heaters = list(set(target_heaters))
+        
+        _LOGGER.debug(f"Found {len(target_heaters)} target water heaters")
 
         for heater in target_heaters:
             if mode:
@@ -102,11 +144,41 @@ async def async_setup_entry(
             else:
                 await heater.async_turn_boost_mode_off()
 
-    # Register boost service
+    async def async_cancel_hot_water_boost(service: ServiceCall) -> None:
+        """Handle the cancel boost service call."""
+        entity_ids = service.data.get(ATTR_ENTITY_ID, [])
+        device_ids = service.data.get(ATTR_DEVICE_ID, [])
+        _LOGGER.debug(f'Canceling hot water boost for entities: {entity_ids}, devices: {device_ids}')
+
+        # Get target heaters from entity IDs
+        target_heaters = [
+            heater for heater in entities
+            if not entity_ids or heater.entity_id in entity_ids
+        ]
+        
+        # Add target heaters from device IDs
+        for device_id in device_ids:
+            target_heaters.extend(get_water_heaters_for_device(device_id))
+            
+        # Remove duplicates
+        target_heaters = list(set(target_heaters))
+        
+        _LOGGER.debug(f"Found {len(target_heaters)} target water heaters")
+
+        for heater in target_heaters:
+            await heater.async_turn_boost_mode_off()
+
+    # Register services
     hass.services.async_register(
         DOMAIN,
         SERVICE_BOOST_HOT_WATER,
         async_hot_water_boost,
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CANCEL_BOOST_HOT_WATER,
+        async_cancel_hot_water_boost,
     )
 
 class NestWaterHeater(WaterHeaterEntity):
@@ -136,8 +208,8 @@ class NestWaterHeater(WaterHeaterEntity):
         return None
 
     @property
-    def temperature_unit(self) -> None:
-        """Return None as this water heater doesn't use temperature."""
+    def temperature_unit(self) -> NotImplementedError:
+        """Return not implemented as this water heater doesn't use temperature."""
         return None
 
     def __init__(self, device_id: str, api, entry_id: str) -> None:
