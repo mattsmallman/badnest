@@ -10,9 +10,6 @@ boost_hot_water:
     entity:
       domain: water_heater
       integration: badnest
-    device:
-      integration: badnest
-      domain: climate
 
   # Fields
   fields:
@@ -48,6 +45,3 @@ cancel_boost_hot_water:
     entity:
       domain: water_heater
       integration: badnest
-    device:
-      integration: badnest
-      domain: climate
