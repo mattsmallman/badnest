@@ -1,4 +1,5 @@
 """Diagnostics support for Bad Nest."""
+from __future__ import annotations
 from typing import Any
 
 from homeassistant.components import diagnostics
@@ -21,6 +22,18 @@ TO_REDACT = {
     "where_id",
 }
 
+
+async def _get_device_counts(api: Any) -> dict[str, int]:
+    """Get device counts in a non-blocking way."""
+    return {
+        "thermostats": len(api.thermostats),
+        "temperature_sensors": len(api.temperature_sensors),
+        "cameras": len(api.cameras),
+        "smoke_detectors": len(api.protects),
+        "hot_water_controllers": len(api.hotwatercontrollers),
+    }
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -28,13 +41,12 @@ async def async_get_config_entry_diagnostics(
     api = hass.data[DOMAIN][entry.entry_id]["api"]
 
     # Get device data with sensitive information redacted
-    device_data = {
-        device_id: {
+    device_data = {}
+    for device_id, data in api.device_data.items():
+        device_data[device_id] = {
             k: "**redacted**" if k in TO_REDACT else v
             for k, v in data.items()
         }
-        for device_id, data in api.device_data.items()
-    }
 
     # Build diagnostics data
     diagnostics_data = {
@@ -43,13 +55,7 @@ async def async_get_config_entry_diagnostics(
             "data": diagnostics.async_redact_data(entry.data, TO_REDACT),
         },
         "device_data": device_data,
-        "device_counts": {
-            "thermostats": len(api.thermostats),
-            "temperature_sensors": len(api.temperature_sensors),
-            "cameras": len(api.cameras),
-            "smoke_detectors": len(api.protects),
-            "hot_water_controllers": len(api.hotwatercontrollers),
-        },
+        "device_counts": await _get_device_counts(api),
     }
 
     return diagnostics_data

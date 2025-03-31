@@ -230,19 +230,6 @@ class NestWaterHeater(WaterHeaterEntity):
         self._attr_name = f"{device_data.get('name', '')} Hot Water"
         _LOGGER.info(f"Created water heater entity: {self._attr_name}")
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        # Link to thermostat as parent device
-        return DeviceInfo(
-            identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
-            name=self.device.device_data[self.device_id]['name'],
-            manufacturer="Nest",
-            model="Thermostat",
-            sw_version=self.device.device_data[self.device_id].get('software_version'),
-            suggested_area=self.device.device_data[self.device_id].get('where_name'),
-            via_device=(DOMAIN, self._entry_id),  # Link to parent thermostat
-        )
 
     @property
     def icon(self) -> str:
