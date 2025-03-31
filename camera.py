@@ -65,7 +65,6 @@ class NestCamera(Camera):
             model=device_data.get('model', "Camera"),
             sw_version=device_data.get('software_version'),
             suggested_area=device_data.get('where_name'),
-            via_device=(DOMAIN, self._entry_id),
         )
 
     @property

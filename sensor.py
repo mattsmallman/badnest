@@ -143,7 +143,6 @@ class NestBaseSensor(SensorEntity):
             manufacturer="Nest",
             suggested_area=data.get('where_name'),
             configuration_url=NEST_HOME_URL,
-            via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
             serial_number=self.device_id,
         )
@@ -189,7 +188,6 @@ class NestTemperatureSensor(NestBaseSensor):
             hw_version=data.get('model_version'),
             suggested_area=data.get('where_name'),
             configuration_url=NEST_HOME_URL,
-            via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
             serial_number=self.device_id,
         )
@@ -271,7 +269,6 @@ class NestProtectSensor(SensorEntity):
             hw_version=data.get('model_version'),
             suggested_area=data.get('where_name'),
             configuration_url=NEST_HOME_URL,
-            via_device=(DOMAIN, self._entry.entry_id),
             connections=connections,
             serial_number=self.device_id,
         )

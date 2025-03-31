@@ -197,7 +197,6 @@ class NestClimate(ClimateEntity):
             hw_version=data.get('backplate_bsl_version'),
             suggested_area=data.get('where_name'),
             configuration_url="https://home.nest.com",
-            via_device=(DOMAIN, self._entry_id),
             connections=connections,
             serial_number=serial_number,
         )
