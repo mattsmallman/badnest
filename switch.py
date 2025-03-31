@@ -51,6 +51,14 @@ class NestChimeSwitch(SwitchEntity):
         self._attr_is_on = device_data.get('chime_state', False)
 
     @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        # Use the same device identifier as the camera
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
+        )
+
+    @property
     def icon(self) -> str:
         """Return the icon to use in the frontend."""
         return "mdi:bell" if self.is_on else "mdi:bell-off"

@@ -230,6 +230,14 @@ class NestWaterHeater(WaterHeaterEntity):
         self._attr_name = f"{device_data.get('name', '')} Hot Water"
         _LOGGER.info(f"Created water heater entity: {self._attr_name}")
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        # Use the same device identifier as the thermostat
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry_id}_{self.device_id}")},
+        )
+
 
     @property
     def icon(self) -> str:
