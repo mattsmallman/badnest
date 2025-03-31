@@ -19,6 +19,7 @@ from homeassistant.components.water_heater import (
     ATTR_OPERATION_MODE,
     ATTR_OPERATION_LIST,
 )
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DOMAIN
@@ -186,6 +187,7 @@ class NestWaterHeater(WaterHeaterEntity):
 
     _attr_has_entity_name = True
     _attr_supported_features = SUPPORTED_FEATURES
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def current_temperature(self) -> None:
@@ -245,7 +247,7 @@ class NestWaterHeater(WaterHeaterEntity):
     @property
     def icon(self) -> str:
         """Return the icon to use in the frontend."""
-        return "mdi:water" if self.current_operation == STATE_SCHEDULE else "mdi:water-off"
+        return "mdi:water-boiler" if self.current_operation == STATE_SCHEDULE else "mdi:water-boiler-off"
 
     @property
     def operation_list(self) -> list[str]:
