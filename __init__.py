@@ -24,7 +24,6 @@ PLATFORMS = [
     Platform.WATER_HEATER,
     Platform.CAMERA,
     Platform.SWITCH,
-    Platform.DIAGNOSTICS,
 ]
 
 CONFIG_SCHEMA = vol.Schema(
